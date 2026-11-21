@@ -188,11 +188,23 @@ function lineAlpha(gray, N, p, mmPerPx) {
  * Возвращает { main, photo } — ImageData N×N (RGBA, фон прозрачный).
  */
 export function processAll(img, p, N = 1024) {
-  const src = compose(img, p, N);
+  return processImageData(compose(img, p, N), p);
+}
+
+// В браузере — настоящий ImageData, в Node (тесты) — объект той же формы.
+function makeImage(N) {
+  return typeof ImageData !== 'undefined'
+    ? new ImageData(N, N)
+    : { width: N, height: N, data: new Uint8ClampedArray(N * N * 4) };
+}
+
+/** Чистая обработка уже скомпонованного квадрата src ({width, data} RGBA). */
+export function processImageData(src, p) {
+  const N = src.width;
   const d = src.data, n = N * N;
   const mask = shapeMask(p.shape, N);
 
-  const photo = new ImageData(N, N);
+  const photo = makeImage(N);
   const pd = photo.data;
   for (let i = 0; i < n; i++) {
     const k = i * 4;
@@ -207,7 +219,7 @@ export function processAll(img, p, N = 1024) {
     gray[i] = (0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2]) * a + 255 * (1 - a);
   }
   const [cr, cg, cb] = hexToRgb(p.color);
-  const main = new ImageData(N, N);
+  const main = makeImage(N);
   const md = main.data;
   const mmPerPx = (p.diameter * 10) / N;
 

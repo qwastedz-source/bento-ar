@@ -2,102 +2,266 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Бенто Калька AR</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='36' r='22' fill='%23f7d9e3'/%3E%3Ccircle cx='32' cy='36' r='14' fill='none' stroke='%2300c95a' stroke-width='4'/%3E%3C/svg%3E">
+<meta name="description" content="AR-трафарет для рисования на бенто-тортах в Meta Quest 3">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23e64980'/%3E%3Cellipse cx='32' cy='36' rx='20' ry='14' fill='%23fff5f8'/%3E%3Cellipse cx='32' cy='33' rx='12' ry='7' fill='none' stroke='%230ca678' stroke-width='3' stroke-dasharray='4 3'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css">
 <style>
-  :root {
-    --bg: #f6f2ec; --card: #ffffff; --text: #1e1b18; --muted: #6d665e; --line: #e6dfd5;
-    --chip: #f2ece4; --accent: #d6336c; --accent-ink: #ffffff; --ok: #1f8a5b; --warn: #b45309;
-    --radius: 16px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #141519; --card: #1e2026; --text: #f3efe9; --muted: #a39c94; --line: #2f323a;
-      --chip: #2a2d35; --accent: #ff6b9a; --accent-ink: #1a0a10; --ok: #34d399; --warn: #fbbf24;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #141519; --card: #1e2026; --text: #f3efe9; --muted: #a39c94; --line: #2f323a;
-    --chip: #2a2d35; --accent: #ff6b9a; --accent-ink: #1a0a10; --ok: #34d399; --warn: #fbbf24;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { padding: 20px 16px 4px; max-width: 1200px; margin: 0 auto; }
-  header h1 { margin: 0; font-size: 26px; letter-spacing: -0.01em; }
-  header p { margin: 4px 0 0; color: var(--muted); }
-  .layout { max-width: 1200px; margin: 0 auto; padding: 12px 16px 48px;
-    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-  @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } .previewWrap { order: -1; } }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 16px; margin-bottom: 14px; }
-  .card h2 { margin: 0 0 10px; font-size: 17px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-  button, .btn { appearance: none; border: 1px solid var(--line); background: var(--chip); color: var(--text);
-    border-radius: 12px; padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; min-height: 44px; }
-  button:hover, .btn:hover { filter: brightness(1.05); }
-  .btn.primary, button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-  input[type=text], input[type=url] { flex: 1 1 200px; min-width: 0; min-height: 44px; padding: 8px 12px; border-radius: 12px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
-  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-  .seg button[aria-pressed="true"], .chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-  .field { margin: 10px 0; }
-  .field label { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 15px; }
-  .field output { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 500; }
-  input[type=range] { width: 100%; height: 32px; accent-color: var(--accent); }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-  .chips button { min-height: 36px; padding: 6px 12px; }
-  .check { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 8px 0; cursor: pointer; }
-  .check input { width: 22px; height: 22px; accent-color: var(--accent); }
-  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
-  .swatches button { width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 3px solid var(--line); }
-  .swatches button[aria-pressed="true"] { border-color: var(--text); }
-  .hint { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
-  .previewWrap { position: sticky; top: 12px; }
-  #preview { width: 100%; aspect-ratio: 1; display: block; border-radius: var(--radius); background: #2d2724;
-    touch-action: none; cursor: grab; border: 1px solid var(--line); }
+  .top { max-width: 1240px; margin: 0 auto; padding: 18px 16px 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(140deg, var(--accent), var(--accent-2)); display: grid; place-items: center; box-shadow: 0 8px 20px -8px var(--accent); }
+  .brand h1 { font-size: 22px; line-height: 1.1; display: flex; align-items: center; gap: 8px; }
+  .brand h1 span { font: 900 11px/1 var(--font); letter-spacing: .08em; padding: 4px 7px; border-radius: 6px; background: var(--text); color: var(--bg); }
+  .brand p { color: var(--muted); font-size: 14px; }
+  .top-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  .app { max-width: 1240px; margin: 0 auto; padding: 10px 16px 120px; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+
+  .stage { padding: 14px; position: sticky; top: 12px; }
+  @media (max-width: 900px) { .stage { position: static; } }
+  .canvas-box { position: relative; border-radius: var(--r-md); overflow: hidden; }
+  #preview { width: 100%; aspect-ratio: 1; display: block; touch-action: none; cursor: grab; background: #2c2420; }
   #preview:active { cursor: grabbing; }
-  .previewInfo { color: var(--muted); font-size: 14px; margin: 8px 2px 12px; min-height: 20px; }
-  button.big { width: 100%; font-size: 20px; padding: 16px; min-height: 60px; border-radius: 16px; }
-  #xrStatus.ok { color: var(--ok); } #xrStatus.bad { color: var(--warn); }
-  details.help { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; margin-top: 14px; }
-  details.help summary { font-weight: 700; cursor: pointer; }
-  details.help ol { padding-left: 20px; margin: 10px 0 0; }
-  details.help li { margin-bottom: 6px; }
-  kbd { background: var(--chip); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; font: 600 13px/1.6 ui-monospace, monospace; }
-  [hidden] { display: none !important; }
+  .tools { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 4px; padding: 5px; border-radius: 16px;
+    background: rgba(20, 14, 12, .62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .tools button { appearance: none; border: 0; width: 44px; height: 44px; border-radius: 12px; background: transparent; color: #fff; display: grid; place-items: center; cursor: pointer; }
+  .tools button:hover { background: rgba(255, 255, 255, .14); }
+  .tools button[aria-pressed="true"] { background: var(--accent); }
+  .tools .sep { width: 1px; background: rgba(255, 255, 255, .2); margin: 8px 2px; }
+  .stage-info { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 13px; padding: 10px 4px 2px; flex-wrap: wrap; }
+
+  .sources { margin-top: 14px; }
+  .sources-head { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px 8px; }
+  .sources-head h3 { font-size: 16px; }
+  .sources-head small { color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .tile { position: relative; aspect-ratio: 1; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font: 700 13px/1.1 var(--font); cursor: pointer; overflow: hidden; padding: 0; text-align: center; }
+  .tile:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+  .tile.action svg.i { width: 24px; height: 24px; color: var(--accent); }
+  .tile.action.hl { background: var(--accent-soft); border-color: transparent; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; background: #fff; }
+  .tile.current { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .tile .del { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; }
+  .tile:hover .del, .tile:focus-within .del { opacity: 1; }
+  @media (hover: none) { .tile .del { opacity: .85; } }
+  .tile .del svg.i { width: 14px; height: 14px; }
+  .url-row { display: flex; gap: 8px; margin-top: 10px; }
+
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 5px; background: var(--surface-2); border-radius: 16px; }
+  .tabs button { appearance: none; border: 0; min-height: 44px; border-radius: 12px; background: transparent; color: var(--muted); font: 800 15px var(--font); cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .panel { padding: 18px 18px 20px; }
+  .panel h2 { font-size: 18px; margin-bottom: 2px; }
+  .panel .lead { color: var(--muted); font-size: 14px; }
+
+  .choice { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
+  .choice.four { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 520px) { .choice.four { grid-template-columns: repeat(2, 1fr); } }
+  .choice button { appearance: none; border: 2px solid var(--line); background: var(--surface); color: var(--text); border-radius: 16px; padding: 12px 8px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; font: 800 14px/1.15 var(--font); cursor: pointer; text-align: center; }
+  .choice button small { font: 600 12px/1.2 var(--font); color: var(--muted); }
+  .choice button svg { width: 44px; height: 44px; }
+  .choice button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+
+  .stepper { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .stepper .val { flex: 1; text-align: center; font: 900 34px/1 var(--font); font-variant-numeric: tabular-nums; }
+  .stepper .val small { font-size: 16px; color: var(--muted); font-weight: 700; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chips button { appearance: none; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); border-radius: 999px; padding: 8px 14px; font: 700 14px var(--font); cursor: pointer; }
+  .chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .swatches button { width: 40px; height: 40px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0; }
+  .swatches button[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--accent); }
+
+  details.more { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 6px; }
+  details.more summary { cursor: pointer; font-weight: 800; color: var(--muted); padding: 8px 0; list-style: none; display: flex; align-items: center; gap: 6px; }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::before { content: "▸"; transition: transform .15s; }
+  details.more[open] summary::before { transform: rotate(90deg); }
+
+  .cta { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .cta-row { display: flex; gap: 8px; }
+  .cta-row .btn { flex: 1; }
+  #xrStatus { font-size: 14px; color: var(--muted); text-align: center; }
+  @media (max-width: 900px) {
+    .cta { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; border-radius: var(--r) var(--r) 0 0; border-bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+    .cta .cta-row { display: none; }
+  }
+
+  /* phone dialog */
+  .phone-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; align-items: center; }
+  @media (max-width: 640px) { .phone-grid { grid-template-columns: minmax(0, 1fr); justify-items: center; } }
+  .qr-wrap { background: #fff; border-radius: 18px; padding: 12px; box-shadow: var(--shadow); width: 260px; height: 260px; display: grid; place-items: center; }
+  #qr { width: 236px; height: 236px; image-rendering: pixelated; }
+  .mini-steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 10px; }
+  .mini-steps li { counter-increment: s; display: flex; gap: 10px; align-items: flex-start; font-weight: 600; }
+  .mini-steps li::before { content: counter(s); flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 900; }
+  .code-box { margin-top: 14px; padding: 12px 14px; border-radius: 16px; background: var(--surface-2); }
+  .code-box small { color: var(--muted); font-size: 13px; }
+  .code-box .addr { font-weight: 800; word-break: break-all; }
+  .code { font: 900 36px/1.1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .18em; margin-top: 4px; }
+  .phone-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .fine { color: var(--muted); font-size: 13px; }
+
+  /* help dialog */
+  .help-steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 12px; }
+  .help-steps li { counter-increment: s; display: grid; grid-template-columns: 32px 1fr; gap: 12px; }
+  .help-steps li::before { content: counter(s); width: 32px; height: 32px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 900; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 16px; }
+  .keys div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; font-size: 14px; }
+  kbd { display: inline-block; min-width: 26px; text-align: center; background: var(--surface); border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 7px; padding: 1px 6px; font: 800 13px/1.5 var(--font); }
 </style>
 </head>
 <body>
-<header>
-  <h1>Бенто Калька AR</h1>
-  <p>Подготовь картинку и наложи её на торт в Quest 3. После фиксации её ничего не сдвинет.</p>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 17l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-rotl" viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M4.5 10A8 8 0 1 1 6 16.5"/></symbol>
+  <symbol id="i-rotr" viewBox="0 0 24 24"><path d="M20 4v6h-6"/><path d="M19.5 10A8 8 0 1 0 18 16.5"/></symbol>
+  <symbol id="i-flip" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8 7 3 12l5 5V7zM16 7l5 5-5 5V7z"/></symbol>
+  <symbol id="i-center" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5h.01"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-vr" viewBox="0 0 24 24"><path d="M3 9a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-3l-1.5-2.5a1.7 1.7 0 0 0-3 0L9 18H6a3 3 0 0 1-3-3z"/><circle cx="8" cy="12" r="1.5"/><circle cx="16" cy="12" r="1.5"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+</svg>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="30" height="30"><ellipse cx="16" cy="19" rx="12" ry="8.5" fill="#fff5f8"/><ellipse cx="16" cy="17" rx="7" ry="4" fill="none" stroke="#0ca678" stroke-width="2" stroke-dasharray="2.5 2"/></svg>
+    </div>
+    <div>
+      <h1>Бенто Калька <span>AR</span></h1>
+      <p>Трафарет на торт в Meta Quest 3</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="xrPill" class="pill">проверяю AR…</span>
+    <span id="phonePill" class="pill" hidden></span>
+    <button class="btn soft" id="phoneBtn"><svg class="i"><use href="#i-phone"/></svg>С телефона</button>
+    <button class="btn soft icon" id="helpBtn" aria-label="Как пользоваться"><svg class="i"><use href="#i-help"/></svg></button>
+  </div>
 </header>
 
-<main class="layout">
-  <section class="controls">
-    <div class="card">
-      <h2>1. Картинка</h2>
-      <div class="row">
-        <label class="btn primary">Выбрать файл<input type="file" id="file" accept="image/*" hidden></label>
-        <button id="demo">Пример: мишка</button>
+<main class="app">
+  <section class="card stage">
+    <div class="canvas-box">
+      <canvas id="preview" width="1024" height="1024" aria-label="Превью трафарета на торте"></canvas>
+      <div class="tools" role="toolbar" aria-label="Положение картинки">
+        <button data-tool="zoomOut" title="Меньше"><svg class="i"><use href="#i-minus"/></svg></button>
+        <button data-tool="zoomIn" title="Больше"><svg class="i"><use href="#i-plus"/></svg></button>
+        <span class="sep"></span>
+        <button data-tool="rotL" title="Повернуть влево на 15°"><svg class="i"><use href="#i-rotl"/></svg></button>
+        <button data-tool="rotR" title="Повернуть вправо на 15°"><svg class="i"><use href="#i-rotr"/></svg></button>
+        <button data-tool="mirror" title="Зеркально"><svg class="i"><use href="#i-flip"/></svg></button>
+        <span class="sep"></span>
+        <button data-tool="center" title="По центру"><svg class="i"><use href="#i-center"/></svg></button>
       </div>
-      <div class="row">
-        <input type="url" id="url" placeholder="или ссылка на картинку">
-        <button id="urlBtn">Загрузить</button>
+    </div>
+    <div class="stage-info"><span>Тяни картинку пальцем, колесо или щипок меняют масштаб</span><span id="info"></span></div>
+
+    <div class="sources">
+      <div class="sources-head"><h3>Картинка</h3><small>последние 8 сохраняются</small></div>
+      <div class="tiles" id="tiles">
+        <label class="tile action hl" title="Выбрать файл"><svg class="i"><use href="#i-upload"/></svg>Файл<input type="file" id="file" accept="image/*" hidden></label>
+        <button class="tile action hl" id="phoneTile"><svg class="i"><use href="#i-phone"/></svg>С телефона</button>
+        <button class="tile action" id="demo"><svg class="i"><use href="#i-spark"/></svg>Пример</button>
       </div>
-      <p class="hint">На ПК можно вставить картинку через <kbd>Ctrl</kbd>+<kbd>V</kbd>. Последняя картинка сохраняется.</p>
+      <div class="url-row">
+        <input type="url" id="url" placeholder="или вставь ссылку на картинку" aria-label="Ссылка на картинку">
+        <button class="btn soft" id="urlBtn"><svg class="i"><use href="#i-link"/></svg>Открыть</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="side">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="stencil" aria-selected="true">Трафарет</button>
+      <button role="tab" data-tab="cake" aria-selected="false">Торт</button>
+      <button role="tab" data-tab="pos" aria-selected="false">Положение</button>
     </div>
 
-    <div class="card">
-      <h2>2. Торт</h2>
-      <div class="seg" data-seg="shape">
-        <button data-v="circle">Круглый</button>
-        <button data-v="square">Квадратный</button>
+    <div class="card panel" data-panel="stencil">
+      <h2>Как рисовать</h2>
+      <p class="lead">Что показывать поверх торта</p>
+      <div class="choice four" data-seg="mode">
+        <button data-v="lines"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="15" fill="none" stroke="var(--mint)" stroke-width="3"/><path d="M17 27c3 4 11 4 14 0" fill="none" stroke="var(--mint)" stroke-width="3" stroke-linecap="round"/><circle cx="19" cy="20" r="2" fill="var(--mint)"/><circle cx="29" cy="20" r="2" fill="var(--mint)"/></svg>Контур<small>линии для обводки</small></button>
+        <button data-v="mix"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="15" fill="#e8c39e"/><circle cx="24" cy="24" r="15" fill="none" stroke="var(--mint)" stroke-width="3"/><circle cx="19" cy="20" r="2" fill="#3b2a20"/><circle cx="29" cy="20" r="2" fill="#3b2a20"/></svg>Контур + фото<small>линии и цвета</small></button>
+        <button data-v="fill"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="15" fill="none" stroke="var(--line)" stroke-width="2"/><circle cx="19" cy="20" r="4" fill="var(--mint)" opacity=".75"/><circle cx="29" cy="20" r="4" fill="var(--mint)" opacity=".75"/><ellipse cx="24" cy="29" rx="5" ry="3.5" fill="var(--mint)" opacity=".75"/></svg>Пятна<small>тёмные места</small></button>
+        <button data-v="photo"><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="15" fill="#e8c39e"/><circle cx="19" cy="20" r="2.2" fill="#3b2a20"/><circle cx="29" cy="20" r="2.2" fill="#3b2a20"/><path d="M18 28c3 3 9 3 12 0" fill="none" stroke="#3b2a20" stroke-width="2" stroke-linecap="round"/></svg>Фото<small>как есть</small></button>
+      </div>
+
+      <div data-show="lines mix">
+        <div class="field">
+          <div class="field-head"><label for="thr">Детализация</label><output data-for="thr"></output></div>
+          <input type="range" id="thr" data-k="thr" min="0.03" max="0.5" step="0.01" data-invert>
+          <small>Влево больше линий, вправо только главные</small>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="thick">Толщина линии</label><output data-for="thick"></output></div>
+          <input type="range" id="thick" data-k="thick" min="0.3" max="3" step="0.1">
+        </div>
+      </div>
+      <div data-show="fill">
+        <div class="field">
+          <div class="field-head"><label for="fillThr">Что считать тёмным</label><output data-for="fillThr"></output></div>
+          <input type="range" id="fillThr" data-k="fillThr" min="10" max="245" step="1">
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="fillAlpha">Плотность заливки</label><output data-for="fillAlpha"></output></div>
+          <input type="range" id="fillAlpha" data-k="fillAlpha" min="0.15" max="1" step="0.05">
+        </div>
+        <label class="switch">Наоборот: светлые места<input type="checkbox" data-k="invert"></label>
+      </div>
+      <div data-show="lines mix fill">
+        <div class="field"><div class="field-head"><label>Цвет в шлеме</label></div><div class="swatches" id="swatches"></div></div>
       </div>
       <div class="field">
-        <label>Диаметр / сторона верха <output data-for="diameter"></output></label>
-        <input type="range" data-k="diameter" min="6" max="20" step="0.1">
+        <div class="field-head"><label for="opacity">Яркость в AR</label><output data-for="opacity"></output></div>
+        <input type="range" id="opacity" data-k="opacity" min="0.1" max="1" step="0.05">
+      </div>
+      <details class="more" data-show="lines mix">
+        <summary>Тонкая настройка линий</summary>
+        <div class="field">
+          <div class="field-head"><label for="blur">Сглаживание</label><output data-for="blur"></output></div>
+          <input type="range" id="blur" data-k="blur" min="0" max="8" step="1">
+          <small>Убирает мелкую текстуру: шерсть, шум фото</small>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="minLen">Убрать обрывки короче</label><output data-for="minLen"></output></div>
+          <input type="range" id="minLen" data-k="minLen" min="0" max="15" step="0.5">
+        </div>
+      </details>
+    </div>
+
+    <div class="card panel" data-panel="cake" hidden>
+      <h2>Торт</h2>
+      <p class="lead">В шлеме размер можно измерить по краю торта</p>
+      <div class="choice" data-seg="shape">
+        <button data-v="circle"><svg viewBox="0 0 48 48"><ellipse cx="24" cy="28" rx="17" ry="11" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.5"/><ellipse cx="24" cy="22" rx="17" ry="11" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5"/></svg>Круглый</button>
+        <button data-v="square"><svg viewBox="0 0 48 48"><path d="M8 20 24 12l16 8v8l-16 8-16-8z" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/><path d="M8 20l16 8 16-8M24 28v8" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/></svg>Квадратный</button>
+      </div>
+      <div class="field">
+        <div class="field-head"><label id="diamLabel">Диаметр верха</label></div>
+        <div class="stepper">
+          <button class="btn soft icon" data-step="-0.5" aria-label="Меньше на 5 мм"><svg class="i"><use href="#i-minus"/></svg></button>
+          <div class="val" id="diamVal">10.0 <small>см</small></div>
+          <button class="btn soft icon" data-step="0.5" aria-label="Больше на 5 мм"><svg class="i"><use href="#i-plus"/></svg></button>
+        </div>
+        <input type="range" data-k="diameter" min="6" max="20" step="0.1" aria-labelledby="diamLabel" style="margin-top:8px">
         <div class="chips">
           <button data-set="diameter" data-v="8">8 см</button>
           <button data-set="diameter" data-v="10">10 см</button>
@@ -106,92 +270,81 @@
           <button data-set="diameter" data-v="14">14 см</button>
         </div>
       </div>
-      <p class="hint">Если в шлеме откалибровать по краю торта, размер подставится сам.</p>
     </div>
 
-    <div class="card">
-      <h2>3. Как лежит картинка</h2>
+    <div class="card panel" data-panel="pos" hidden>
+      <h2>Положение картинки</h2>
+      <p class="lead">Верх превью соответствует дальней от тебя стороне торта</p>
       <div class="field">
-        <label>Масштаб <output data-for="zoom"></output></label>
-        <input type="range" data-k="zoom" min="0.2" max="3" step="0.01">
+        <div class="field-head"><label for="zoom">Масштаб</label><output data-for="zoom"></output></div>
+        <input type="range" id="zoom" data-k="zoom" min="0.2" max="3" step="0.01">
       </div>
       <div class="field">
-        <label>Поворот <output data-for="rot"></output></label>
-        <input type="range" data-k="rot" min="-180" max="180" step="1">
+        <div class="field-head"><label for="rot">Поворот</label><output data-for="rot"></output></div>
+        <input type="range" id="rot" data-k="rot" min="-180" max="180" step="1">
       </div>
-      <label class="check"><input type="checkbox" data-k="mirror"> Зеркально</label>
-      <div class="row"><button id="resetPos">По центру</button></div>
-      <p class="hint">Картинку можно двигать пальцем или мышью прямо на превью, колесо или щипок меняют масштаб.</p>
+      <label class="switch">Зеркально<input type="checkbox" data-k="mirror"></label>
+      <div class="field"><button class="btn soft" data-tool="center"><svg class="i"><use href="#i-center"/></svg>Вернуть по центру</button></div>
     </div>
 
-    <div class="card">
-      <h2>4. Обработка</h2>
-      <div class="seg" data-seg="mode">
-        <button data-v="lines">Контур</button>
-        <button data-v="mix">Контур + фото</button>
-        <button data-v="fill">Тёмные пятна</button>
-        <button data-v="photo">Фото</button>
-      </div>
-      <div data-show="lines mix">
-        <div class="field">
-          <label>Порог линий (меньше = больше линий) <output data-for="thr"></output></label>
-          <input type="range" data-k="thr" min="0.03" max="0.5" step="0.01">
-        </div>
-        <div class="field">
-          <label>Сглаживание (убирает мелочь) <output data-for="blur"></output></label>
-          <input type="range" data-k="blur" min="0" max="8" step="1">
-        </div>
-        <div class="field">
-          <label>Толщина линии <output data-for="thick"></output></label>
-          <input type="range" data-k="thick" min="0.3" max="3" step="0.1">
-        </div>
-        <div class="field">
-          <label>Убрать обрывки короче <output data-for="minLen"></output></label>
-          <input type="range" data-k="minLen" min="0" max="15" step="0.5">
-        </div>
-      </div>
-      <div data-show="fill">
-        <div class="field">
-          <label>Порог тёмного <output data-for="fillThr"></output></label>
-          <input type="range" data-k="fillThr" min="10" max="245" step="1">
-        </div>
-        <div class="field">
-          <label>Плотность заливки <output data-for="fillAlpha"></output></label>
-          <input type="range" data-k="fillAlpha" min="0.15" max="1" step="0.05">
-        </div>
-        <label class="check"><input type="checkbox" data-k="invert"> Наоборот (светлые места)</label>
-      </div>
-      <div data-show="lines mix fill">
-        <div class="field"><label>Цвет линий в шлеме</label></div>
-        <div class="swatches" id="swatches"></div>
-      </div>
-      <div class="field">
-        <label>Непрозрачность в AR <output data-for="opacity"></output></label>
-        <input type="range" data-k="opacity" min="0.1" max="1" step="0.05">
+    <div class="card cta">
+      <button id="enterAR" class="btn primary xl"><svg class="i" style="width:26px;height:26px"><use href="#i-vr"/></svg>Войти в AR</button>
+      <p id="xrStatus">Проверяю поддержку AR…</p>
+      <div class="cta-row">
+        <button class="btn soft" id="helpBtn2"><svg class="i"><use href="#i-help"/></svg>Как пользоваться</button>
       </div>
     </div>
-  </section>
-
-  <section class="previewWrap">
-    <canvas id="preview" width="1024" height="1024" aria-label="Превью трафарета на торте"></canvas>
-    <div class="previewInfo" id="info"></div>
-    <button id="enterAR" class="primary big">Войти в AR</button>
-    <p id="xrStatus" class="hint">Проверяю поддержку AR…</p>
-
-    <details class="help" open>
-      <summary>Как пользоваться в шлеме</summary>
-      <ol>
-        <li>Поставь торт на стол, включи яркий свет. Если торт стоит на поворотном столике, зафиксируй его.</li>
-        <li>Нажми <b>«Войти в AR»</b>. Перед тобой появятся картинка и панель.</li>
-        <li><b>Калибровка:</b> нажми «Край · 3 точки». У контроллера появится виртуальная игла. Наведи её кончик на край верха торта (касаться не нужно) и нажми курок, всего 3 раза в разных местах края. Руками: сделай щипок прямо над краем.</li>
-        <li><b>Подгонка:</b> кнопки на панели двигают на 1 мм. Правый стик сдвигает, левый поворачивает (влево/вправо) и меняет высоту (вперёд/назад). Если зажать grip, картинку можно перетащить.</li>
-        <li><b>ЗАМОРОЗИТЬ</b>: картинка привязывается к системному якорю, и теперь её ничего не сдвинет. Чтобы разморозить, держи кнопку 1.5 с (или <kbd>Y</kbd>).</li>
-        <li>Положи контроллеры и рисуй. <kbd>B</kbd> прячет или показывает картинку, <kbd>A</kbd> переключает контур и фото. Панель вызывается кнопкой <kbd>X</kbd> или ладонью вверх.</li>
-        <li>Если вышел и зашёл снова, положение восстановится само (если торт не двигали).</li>
-      </ol>
-    </details>
   </section>
 </main>
+
+<dialog id="phoneDlg" aria-labelledby="phoneTitle">
+  <div class="dlg-head"><h2 id="phoneTitle">Картинка с телефона</h2><button class="btn ghost icon" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="dlg-body">
+    <div class="phone-grid">
+      <div class="qr-wrap"><canvas id="qr" width="236" height="236" aria-label="QR-код для телефона"></canvas></div>
+      <div>
+        <ol class="mini-steps">
+          <li>Наведи камеру iPhone или Android на QR-код</li>
+          <li>Открой ссылку и выбери фото из галереи</li>
+          <li>Картинка сразу появится здесь, даже если ты уже в AR</li>
+        </ol>
+        <div class="code-box">
+          <small>Без QR открой на телефоне</small>
+          <div class="addr" id="sendAddr"></div>
+          <small>и введи код шлема</small>
+          <div class="code" id="codeView">······</div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-foot">
+      <span id="phoneStatus" class="pill">запускаю…</span>
+      <button class="btn ghost sm" id="newCode">Сменить код</button>
+    </div>
+    <p class="fine" style="margin-top:12px">Фото идут напрямую с телефона на шлем (WebRTC), на сервер они не загружаются. Лучше, если оба устройства в одной Wi-Fi сети. Код постоянный, ссылку на телефоне можно сохранить в закладки.</p>
+  </div>
+</dialog>
+
+<dialog id="helpDlg" aria-labelledby="helpTitle">
+  <div class="dlg-head"><h2 id="helpTitle">Как пользоваться</h2><button class="btn ghost icon" data-close aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="dlg-body">
+    <ol class="help-steps">
+      <li><div><b>Свет и торт.</b> Поставь торт на стол, включи яркий свет. Поворотный столик зафиксируй.</div></li>
+      <li><div><b>Войти в AR.</b> Перед тобой появятся картинка и панель. Если браузер спросит про «данные о пространстве», нажми «Разрешить».</div></li>
+      <li><div><b>Калибровка.</b> «Край · 3 точки»: наведи кончик розовой иглы на край верха торта (не касаясь) и нажми курок, 3 раза в разных местах. Руками: щипок над краем.</div></li>
+      <li><div><b>Подгонка.</b> Кнопки на панели двигают на 1 мм. Стики: правый двигает, левый крутит и меняет высоту. Зажатый grip перетаскивает.</div></li>
+      <li><div><b>ЗАМОРОЗИТЬ.</b> Картинка привязывается к якорю шлема, и её ничего не сдвинет. Чтобы разморозить, держи кнопку 1.5 с.</div></li>
+      <li><div><b>Рисуй.</b> Положи контроллеры, пальцы будут видны поверх трафарета. Вышла и зашла снова? Положение восстановится само.</div></li>
+    </ol>
+    <div class="keys">
+      <div><kbd>A</kbd> трафарет / фото</div>
+      <div><kbd>B</kbd> скрыть / показать</div>
+      <div><kbd>X</kbd> или ладонь вверх: панель</div>
+      <div><kbd>Y</kbd> заморозить, держать: разморозить</div>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="importmap">
   { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }

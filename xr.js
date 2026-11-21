@@ -1,5 +1,6 @@
 // WebXR-часть: passthrough, калибровка по торту, заморозка с системным якорем.
 import * as THREE from 'three';
+import { faceYaw as faceYawFrom, fitRim, fitSquare, fitCenter, tooClose } from './calib.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEG = Math.PI / 180;
@@ -47,11 +48,7 @@ const st = {
 function savePrefs() { LS.set(LS_PREFS, prefs); }
 function msg(text, ms = 2600) { st.msg = text; st.msgUntil = performance.now() + ms; if (panel) panel.dirty = true; }
 function rightVec(out = new THREE.Vector3()) { return out.set(-st.headFwd.z, 0, st.headFwd.x); }
-function faceYaw(p) {
-  const dx = p.x - st.head.x, dz = p.z - st.head.z;
-  const l = Math.hypot(dx, dz) || 1;
-  return Math.atan2(-dx / l, -dz / l);
-}
+function faceYaw(p) { return faceYawFrom(p, st.head); }
 function yawFromQuat(q) { return new THREE.Euler().setFromQuaternion(q, 'YXZ').y; }
 function buzz(c, k = 0.4, ms = 25) {
   try { c?.userData.src?.gamepad?.hapticActuators?.[0]?.pulse?.(k, ms); } catch {}
@@ -127,7 +124,7 @@ function statusLines(now) {
   const op = Math.round(st.opacity * 100);
   let l1, l2;
   if (st.locked) {
-    l1 = 'ЗАМОРОЖЕНО';
+    l1 = 'Картинка закреплена';
     l2 = `Ø ${d} см · якорь: ${st.anchorStatus} · ${op}%`;
   } else if (st.calib) {
     const need = st.calib.mode === 'center' ? 1 : st.shape === 'square' ? 2 : 3;
@@ -192,30 +189,43 @@ class Panel {
   draw([l1, l2], hover, holdP) {
     const g = this.ctx, W = this.W, H = this.H;
     g.clearRect(0, 0, W, H);
-    rr(g, 2, 2, W - 4, H - 4, 40);
-    g.fillStyle = st.locked ? 'rgba(12,28,58,0.94)' : 'rgba(22,24,30,0.94)';
-    g.fill();
+    rr(g, 2, 2, W - 4, H - 4, 44);
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    if (st.locked) { bg.addColorStop(0, 'rgba(18,30,62,0.96)'); bg.addColorStop(1, 'rgba(10,17,38,0.96)'); }
+    else { bg.addColorStop(0, 'rgba(32,30,38,0.96)'); bg.addColorStop(1, 'rgba(20,19,25,0.96)'); }
+    g.fillStyle = bg; g.fill();
     g.lineWidth = 4;
-    g.strokeStyle = st.locked ? '#3b82f6' : 'rgba(255,255,255,0.18)';
+    g.strokeStyle = st.locked ? 'rgba(116,192,252,0.7)' : 'rgba(255,143,171,0.35)';
     g.stroke();
 
-    g.textBaseline = 'middle'; g.textAlign = 'left';
-    g.fillStyle = st.trackingLost ? '#fbbf24' : st.locked ? '#93c5fd' : '#ffffff';
-    fitFont(g, l1, W - 60, 46, 700); g.fillText(l1, 30, 52);
-    g.fillStyle = 'rgba(255,255,255,0.78)';
-    fitFont(g, l2, W - 60, 32, 500); g.fillText(l2, 30, 104);
+    // плашка режима справа сверху
+    const pill = st.locked ? ['ЗАМОРОЖЕНО', '#4dabf7'] : st.calib ? ['КАЛИБРОВКА', '#ffa94d'] : ['НАСТРОЙКА', '#ff8fab'];
+    g.font = '800 26px system-ui, Roboto, sans-serif';
+    const pw = g.measureText(pill[0]).width + 44;
+    rr(g, W - 30 - pw, 26, pw, 48, 24);
+    g.fillStyle = pill[1] + '33'; g.fill();
+    g.fillStyle = pill[1]; g.textBaseline = 'middle'; g.textAlign = 'center';
+    g.fillText(pill[0], W - 30 - pw / 2, 51);
 
-    this.buttons = layout(buildRows(), 24, 140, W - 48, H - 140 - 24, 14);
+    g.textAlign = 'left';
+    g.fillStyle = st.trackingLost ? '#ffd43b' : '#ffffff';
+    fitFont(g, l1, W - 90 - pw, 42, 750); g.fillText(l1, 34, 52);
+    g.fillStyle = 'rgba(255,255,255,0.72)';
+    fitFont(g, l2, W - 68, 31, 500); g.fillText(l2, 34, 106);
+
+    this.buttons = layout(buildRows(), 24, 144, W - 48, H - 144 - 24, 14);
     for (const b of this.buttons) {
-      let fill = '#2d323d';
-      if (b.active) fill = '#1f7a55';
-      if (b.kind === 'primary') fill = '#2563eb';
-      if (b.kind === 'warn') fill = '#b45309';
-      if (b.disabled) fill = '#23262d';
-      rr(g, b.x, b.y, b.w, b.h, 22);
+      let fill = '#2b2a33', top = 'rgba(255,255,255,0.07)';
+      if (b.active) { fill = '#0f8f6a'; top = 'rgba(255,255,255,0.14)'; }
+      if (b.kind === 'primary') { fill = g.createLinearGradient(0, b.y, 0, b.y + b.h); fill.addColorStop(0, '#f06595'); fill.addColorStop(1, '#c2255c'); }
+      if (b.kind === 'warn') { fill = g.createLinearGradient(0, b.y, 0, b.y + b.h); fill.addColorStop(0, '#ff922b'); fill.addColorStop(1, '#d9480f'); }
+      if (b.disabled) fill = '#202027';
+      rr(g, b.x, b.y, b.w, b.h, 24);
       g.fillStyle = fill; g.fill();
+      g.save(); g.clip(); g.fillStyle = top; g.fillRect(b.x, b.y, b.w, 4); g.restore();
       if (hover.has(b.id)) {
-        g.fillStyle = 'rgba(255,255,255,0.18)'; g.fill();
+        rr(g, b.x, b.y, b.w, b.h, 24);
+        g.fillStyle = 'rgba(255,255,255,0.16)'; g.fill();
         g.lineWidth = 5; g.strokeStyle = '#ffffff'; g.stroke();
       }
       if (b.hold && st.hold && st.hold.id === b.id && holdP > 0) {
@@ -581,49 +591,22 @@ function addMarker(p) {
 }
 function clearMarkers() { while (markers.children.length) markers.remove(markers.children[0]); }
 
-function circle3(a, b, c) {
-  const d = 2 * (a.x * (b.z - c.z) + b.x * (c.z - a.z) + c.x * (a.z - b.z));
-  if (Math.abs(d) < 1e-9) return null;
-  const A = a.x * a.x + a.z * a.z, B = b.x * b.x + b.z * b.z, C = c.x * c.x + c.z * c.z;
-  const x = (A * (b.z - c.z) + B * (c.z - a.z) + C * (a.z - b.z)) / d;
-  const z = (A * (c.x - b.x) + B * (a.x - c.x) + C * (b.x - a.x)) / d;
-  return { x, z, r: Math.hypot(a.x - x, a.z - z) };
-}
-
 function addCalibPoint(p) {
   const cal = st.calib;
-  const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-  if (cal.pts.some((q) => flat(q, p) < 0.015)) { msg('Слишком близко к прошлой точке, отойди дальше по краю'); return; }
+  if (tooClose(cal.pts, p)) { msg('Слишком близко к прошлой точке, отойди дальше по краю'); return; }
   cal.pts.push(p.clone());
   addMarker(p);
   const need = cal.mode === 'center' ? 1 : st.shape === 'square' ? 2 : 3;
   if (cal.pts.length < need) { msg(`Точка ${cal.pts.length} принята`); panel.dirty = true; return; }
 
   const pts = cal.pts;
-  if (cal.mode === 'center') {
-    st.pos.copy(pts[0]);
-    st.yaw = faceYaw(pts[0]);
-  } else if (st.shape === 'square') {
-    const [a, b] = pts;
-    const side = flat(a, b);
-    if (side < 0.03 || side > 0.3) { msg('Странный размер, давай заново'); resetCalib(); return; }
-    const ex = (b.x - a.x) / side, ez = (b.z - a.z) / side;
-    let nx = -ez, nz = ex;
-    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-    if (nx * (mx - st.head.x) + nz * (mz - st.head.z) < 0) { nx = -nx; nz = -nz; }
-    st.pos.set(mx + (nx * side) / 2, (a.y + b.y) / 2, mz + (nz * side) / 2);
-    st.yaw = Math.atan2(-nx, -nz);
-    st.diam = side;
-    st.measured = true;
-  } else {
-    const c = circle3(pts[0], pts[1], pts[2]);
-    if (!c || c.r < 0.02 || c.r > 0.16) { msg('Точки не похожи на круг, давай заново'); resetCalib(); return; }
-    const y = (pts[0].y + pts[1].y + pts[2].y) / 3;
-    st.pos.set(c.x, y, c.z);
-    st.diam = c.r * 2;
-    st.yaw = faceYaw(st.pos);
-    st.measured = true;
-  }
+  const r = cal.mode === 'center' ? fitCenter(pts[0], st.head, st.diam)
+    : st.shape === 'square' ? fitSquare(pts[0], pts[1], st.head)
+      : fitRim(pts, st.head);
+  if (r.error) { msg(r.error); resetCalib(); return; }
+  st.pos.set(r.x, r.y, r.z);
+  st.yaw = r.yaw;
+  if (cal.mode !== 'center') { st.diam = r.diam; st.measured = true; }
   st.calib = null;
   st.markersUntil = performance.now() + 3000;
   msg(`Готово: Ø ${(st.diam * 100).toFixed(1)} см. Подгони и жми ЗАМОРОЗИТЬ`, 5000);
@@ -866,6 +849,26 @@ export async function startXR(o) {
   renderer.setAnimationLoop(onFrame);
   // торт обычно не двигали: сразу пробуем вернуть прошлое замороженное положение
   if (st.canRestore && Date.now() - (saved.t || 0) < 6 * 3600e3) restorePersistent();
+}
+
+export function isActive() { return !!session; }
+/** Измеренный в этой сессии диаметр, см (или null). */
+export function measuredDiameterCm() { return session && st.measured ? st.diam * 100 : null; }
+export function notify(text) { if (session) msg(text, 4000); }
+
+/** Заменить картинку прямо в AR (пришла с телефона) — положение и заморозка не меняются. */
+export function updateImages(main, photo) {
+  if (!session) return;
+  const oldMain = texMain, oldPhoto = texPhoto;
+  texMain = dataTex(main);
+  texPhoto = photo === main ? texMain : dataTex(photo);
+  st.hasPhoto = texPhoto !== texMain;
+  if (!st.hasPhoto) st.view = 'main';
+  imgMat.map = st.view === 'photo' ? texPhoto : texMain;
+  imgMat.needsUpdate = true;
+  if (oldPhoto && oldPhoto !== oldMain) oldPhoto.dispose();
+  if (oldMain) oldMain.dispose();
+  panel.dirty = true;
 }
 
 function onEnd() {

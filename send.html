@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Отправить на шлем · Бенто Калька</title>
+<meta name="theme-color" content="#e64980">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23e64980'/%3E%3Cellipse cx='32' cy='36' rx='20' ry='14' fill='%23fff5f8'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23e64980'/%3E%3Cellipse cx='32' cy='36' rx='20' ry='14' fill='%23fff5f8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css">
+<style>
+  .wrap { max-width: 520px; margin: 0 auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 42px; height: 42px; border-radius: 13px; background: linear-gradient(140deg, var(--accent), var(--accent-2)); display: grid; place-items: center; }
+  .brand h1 { font-size: 20px; }
+  .brand p { color: var(--muted); font-size: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 18px; }
+  .card h2 { font-size: 17px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .code-in { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .code-in input { width: 100%; min-width: 0; aspect-ratio: 0.85; text-align: center; font: 900 26px ui-monospace, "SF Mono", Menlo, monospace; text-transform: uppercase;
+    border-radius: 12px; border: 2px solid var(--line); background: var(--surface-2); color: var(--text); padding: 0; }
+  .code-in input:focus { outline: none; border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 14px; margin-top: 10px; }
+  .pick { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 180px; border-radius: var(--r);
+    background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: var(--accent-ink); font: 900 22px var(--font); cursor: pointer;
+    box-shadow: 0 16px 36px -14px var(--accent); text-align: center; -webkit-tap-highlight-color: transparent; }
+  .pick:active { transform: scale(.98); }
+  .pick small { font: 700 14px var(--font); opacity: .85; }
+  .pick svg { width: 44px; height: 44px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .pick.off { filter: grayscale(.6); opacity: .55; pointer-events: none; }
+  .list { display: grid; gap: 8px; }
+  .item { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 8px; border-radius: 14px; background: var(--surface-2); }
+  .item img { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; background: #fff; }
+  .item b { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item span { font-size: 13px; color: var(--muted); }
+  .item .st { font-size: 20px; }
+  .item.ok span { color: var(--mint); }
+  .item.err span { color: var(--amber); }
+  .resend { display: none; }
+  .item.err .resend { display: inline-flex; }
+  .steps { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; display: grid; gap: 4px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="brand">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 32 32" width="28" height="28"><ellipse cx="16" cy="19" rx="12" ry="8.5" fill="#fff5f8"/><ellipse cx="16" cy="17" rx="7" ry="4" fill="none" stroke="#0ca678" stroke-width="2" stroke-dasharray="2.5 2"/></svg></div>
+    <div><h1>Отправить на шлем</h1><p>Бенто Калька AR</p></div>
+  </div>
+
+  <section class="card">
+    <h2>Код шлема <span id="status" class="pill">введи код</span></h2>
+    <div class="code-in" id="codeIn" aria-label="Код шлема из 6 символов"></div>
+    <p class="hint">Код показан на шлеме: кнопка «С телефона». Если открыла по QR, он уже вписан.</p>
+  </section>
+
+  <label class="pick off" id="pick">
+    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10.5" r="1.8"/><path d="m21 16-5-5-9 8"/></svg>
+    Выбрать фото
+    <small>из галереи или сфотографировать</small>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+  </label>
+
+  <section class="card" id="sentCard" hidden>
+    <h2>Отправлено</h2>
+    <div class="list" id="list"></div>
+  </section>
+
+  <section class="card">
+    <h2>Если не подключается</h2>
+    <ol class="steps">
+      <li>На шлеме должна быть открыта страница Бенто Калька.</li>
+      <li>Телефон и шлем лучше подключить к одной Wi-Fi сети.</li>
+      <li>Проверь код и обнови эту страницу.</li>
+    </ol>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="./send.js"></script>
+</body>
+</html>

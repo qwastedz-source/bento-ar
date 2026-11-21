@@ -1,0 +1,11 @@
+{
+  "name": "bento-ar",
+  "private": true,
+  "type": "module",
+  "description": "AR-калька для рисования на бенто-тортах в Meta Quest 3 (WebXR)",
+  "scripts": {
+    "start": "node serve.mjs",
+    "test": "node --test \"tests/*.test.mjs\""
+  },
+  "engines": { "node": ">=20" }
+}
