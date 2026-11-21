@@ -1,6 +1,6 @@
 // WebXR-часть: passthrough, калибровка по торту, заморозка с системным якорем.
 import * as THREE from 'three';
-import { faceYaw as faceYawFrom, fitRim, fitSquare, fitCenter, tooClose } from './calib.js';
+import { faceYaw as faceYawFrom, fitRim, fitSquare, fitCenter, tooClose, medianPoint, anchorBlend } from './calib.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEG = Math.PI / 180;
@@ -33,6 +33,7 @@ const hands = [];
 const raycaster = new THREE.Raycaster();
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 const headQ = new THREE.Quaternion();
+const aPos = new THREE.Vector3(), aQuat = new THREE.Quaternion();
 let lastT = 0;
 
 const prefs = { showRim: true, showGrid: false, occl: true, step: 1, ...(LS.get(LS_PREFS) || {}) };
@@ -42,7 +43,7 @@ const st = {
   calib: null, opacity: 0.85, view: 'main', hidden: false, hasPhoto: true,
   head: new THREE.Vector3(0, 1.5, 0), headFwd: new THREE.Vector3(0, 0, -1), trackingLost: false,
   initialized: false, measured: false, grab: null, hold: null,
-  msg: '', msgUntil: 0, canRestore: false, markersUntil: 0,
+  msg: '', msgUntil: 0, canRestore: false, markersUntil: 0, hcheck: false, headDist: 0,
 };
 
 function savePrefs() { LS.set(LS_PREFS, prefs); }
@@ -106,8 +107,11 @@ function buildRows() {
     B('calibCenter', 'Центр · 1 точка', { active: st.calib?.mode === 'center' }),
     B('calibRim', sq ? '2 ближних угла' : 'Край · 3 точки', { active: st.calib?.mode === 'rim' }),
   ];
-  if (st.calib) r1.push(B('cancelCalib', 'Отмена'));
-  else if (st.canRestore) r1.push(B('restore', 'Прошлое место'));
+  if (st.calib) r1.push(st.calib.fit ? B('calibDone', 'Готово ✓', { kind: 'primary' }) : B('cancelCalib', 'Отмена'));
+  else {
+    if (st.canRestore) r1.push(B('restore', 'Прошлое место'));
+    r1.push(B('hcheck', 'Проверка высоты', { active: st.hcheck }));
+  }
   const s = prefs.step;
   return [
     { h: 1, items: r1 },
@@ -123,9 +127,16 @@ function statusLines(now) {
   const d = (st.diam * 100).toFixed(1);
   const op = Math.round(st.opacity * 100);
   let l1, l2;
+  const dist = Math.round(st.headDist * 100);
   if (st.locked) {
     l1 = 'Картинка закреплена';
-    l2 = `Ø ${d} см · якорь: ${st.anchorStatus} · ${op}%`;
+    l2 = `Ø ${d} см · якорь: ${st.anchorStatus} · до торта ${dist} см`;
+  } else if (st.calib?.fit) {
+    l1 = `Уточнение: ${st.calib.pts.length} точек · разброс ±${(st.calib.fit.rms * 1000).toFixed(1)} мм`;
+    l2 = 'Ещё точки по краю делают круг точнее. Потом «Готово»';
+  } else if (st.hcheck) {
+    l1 = 'Проверка высоты: медленно качай головой влево-вправо';
+    l2 = 'Едет ПРОТИВ головы → «Ниже». Едет ВМЕСТЕ с головой → «Выше»';
   } else if (st.calib) {
     const need = st.calib.mode === 'center' ? 1 : st.shape === 'square' ? 2 : 3;
     l1 = `Калибровка: точка ${st.calib.pts.length + 1} из ${need}`;
@@ -138,6 +149,7 @@ function statusLines(now) {
     l1 = `Ø ${d} см · прозр ${op}% · шаг ${prefs.step} мм`;
     l2 = 'Откалибруй, подгони и нажми ЗАМОРОЗИТЬ';
   }
+  if (st.headDist > 0 && st.headDist < 0.3 && !st.calib) l1 = `⚠ Слишком близко (${dist} см): вблизи камеры шлема искажают`;
   if (st.trackingLost) l1 = '⚠ Трекинг потерян: посмотри вокруг, не закрывай камеры';
   if (st.msg && now < st.msgUntil) l2 = st.msg;
   return [l1, l2];
@@ -179,7 +191,7 @@ class Panel {
     const hover = ctrls.map((c) => c.userData.hoverId).filter(Boolean).join(',');
     const holdP = st.hold ? Math.min(1, (now - st.hold.t0) / HOLD_MS) : 0;
     const lines = statusLines(now);
-    const key = [st.locked, st.calib?.mode, st.calib?.pts.length, st.canRestore, prefs.step, st.view, st.hidden,
+    const key = [st.locked, st.calib?.mode, st.calib?.pts.length, !!st.calib?.fit, st.hcheck, st.canRestore, prefs.step, st.view, st.hidden,
       prefs.showRim, prefs.showGrid, prefs.occl, hover, holdP.toFixed(2), lines.join('|')].join(';');
     if (!this.dirty && key === this.key) return;
     if (now - this.lastDraw < 60) return;
@@ -432,6 +444,24 @@ function tipPos(c) {
   return new THREE.Vector3(0, 0, -NEEDLE).applyMatrix4(c.matrixWorld);
 }
 
+// Каждый кадр запоминаем кончик иглы/щипка за последние 0.6 с.
+function recordTip(c, now) {
+  const buf = (c.userData.samples ||= []);
+  if (!st.calib || !c.userData.src) { buf.length = 0; return; }
+  const p = tipPos(c);
+  if (p) buf.push({ t: now, x: p.x, y: p.y, z: p.z });
+  while (buf.length && now - buf[0].t > 600) buf.shift();
+}
+// Точка калибровки = медиана положений чуть ДО нажатия: нажатие курка дёргает контроллер.
+function stableTip(c) {
+  const now = performance.now();
+  const hand = !!c.userData.src?.hand;
+  const [a, b] = hand ? [120, -1] : [350, 60];
+  const s = (c.userData.samples || []).filter((q) => now - q.t <= a && now - q.t >= b);
+  if (s.length >= 3) { const m = medianPoint(s); return new THREE.Vector3(m.x, m.y, m.z); }
+  return tipPos(c);
+}
+
 function onSelectStart(c) {
   if (!c.userData.src) return;
   const hit = panel.raycast(c);
@@ -443,7 +473,7 @@ function onSelectStart(c) {
     return;
   }
   if (st.calib && !st.locked) {
-    const p = tipPos(c);
+    const p = stableTip(c);
     if (p) { buzz(c, 0.6, 40); addCalibPoint(p); }
     else msg('Не вижу кончик пальцев или иглы, попробуй ещё');
   }
@@ -600,16 +630,36 @@ function addCalibPoint(p) {
   if (cal.pts.length < need) { msg(`Точка ${cal.pts.length} принята`); panel.dirty = true; return; }
 
   const pts = cal.pts;
+  const rim = cal.mode === 'rim' && st.shape !== 'square';
   const r = cal.mode === 'center' ? fitCenter(pts[0], st.head, st.diam)
     : st.shape === 'square' ? fitSquare(pts[0], pts[1], st.head)
       : fitRim(pts, st.head);
-  if (r.error) { msg(r.error); resetCalib(); return; }
-  st.pos.set(r.x, r.y, r.z);
+  if (r.error) {
+    msg(r.error, 3500);
+    if (r.miss) { pts.pop(); markers.remove(markers.children[markers.children.length - 1]); }
+    else resetCalib();
+    panel.dirty = true;
+    return;
+  }
+  // высоту при уточнении не меняем, если её уже подогнали вручную
+  const keepY = rim && cal.fit && cal.yTouched;
+  st.pos.set(r.x, keepY ? st.pos.y : r.y, r.z);
   st.yaw = r.yaw;
   if (cal.mode !== 'center') { st.diam = r.diam; st.measured = true; }
+  if (rim && pts.length < 8) {
+    // круг уже стоит; можно добавить ещё точки по краю для точности
+    cal.fit = r;
+    msg(`Ø ${(st.diam * 100).toFixed(1)} см. Ещё точки по краю = точнее, потом «Готово»`, 5000);
+    panel.dirty = true;
+    return;
+  }
+  finishCalib();
+}
+function finishCalib() {
   st.calib = null;
   st.markersUntil = performance.now() + 3000;
-  msg(`Готово: Ø ${(st.diam * 100).toFixed(1)} см. Подгони и жми ЗАМОРОЗИТЬ`, 5000);
+  msg(`Готово: Ø ${(st.diam * 100).toFixed(1)} см. Проверь высоту и жми ЗАМОРОЗИТЬ`, 5000);
+  panel.dirty = true;
 }
 function resetCalib() { if (st.calib) st.calib.pts = []; clearMarkers(); panel.dirty = true; }
 
@@ -681,18 +731,28 @@ function action(id, fromHold = false) {
     case 'calibCenter': if (free) { st.calib = { mode: 'center', pts: [] }; clearMarkers(); } break;
     case 'calibRim': if (free) { st.calib = { mode: 'rim', pts: [] }; clearMarkers(); } break;
     case 'cancelCalib': st.calib = null; clearMarkers(); break;
+    case 'calibDone': if (st.calib) finishCalib(); break;
+    case 'hcheck':
+      st.hcheck = !st.hcheck;
+      if (st.hcheck && !prefs.showRim) { prefs.showRim = true; drawGuides(); }
+      break;
     case 'restore': restorePersistent(); break;
     case 'fwd': if (free) st.pos.addScaledVector(st.headFwd, s); break;
     case 'back': if (free) st.pos.addScaledVector(st.headFwd, -s); break;
     case 'right': if (free) st.pos.addScaledVector(rightVec(v3), s); break;
     case 'left': if (free) st.pos.addScaledVector(rightVec(v3), -s); break;
-    case 'up': if (free) st.pos.y += s; break;
-    case 'down': if (free) st.pos.y -= s; break;
+    case 'up': if (free) { st.pos.y += s; if (st.calib) st.calib.yTouched = true; } break;
+    case 'down': if (free) { st.pos.y -= s; if (st.calib) st.calib.yTouched = true; } break;
     case 'rotL': if (free) st.yaw += prefs.step * DEG; break;
     case 'rotR': if (free) st.yaw -= prefs.step * DEG; break;
     case 'smaller': if (free) st.diam = Math.max(0.03, st.diam - s); break;
     case 'bigger': if (free) st.diam = Math.min(0.3, st.diam + s); break;
-    case 'step': prefs.step = prefs.step === 1 ? 5 : 1; savePrefs(); break;
+    case 'step': {
+      const steps = [0.5, 1, 5];
+      prefs.step = steps[(steps.indexOf(prefs.step) + 1) % steps.length];
+      savePrefs();
+      break;
+    }
     case 'opMinus': st.opacity = Math.max(0.1, Math.round((st.opacity - 0.1) * 10) / 10); break;
     case 'opPlus': st.opacity = Math.min(1, Math.round((st.opacity + 0.1) * 10) / 10); break;
     case 'view': if (st.hasPhoto) st.view = st.view === 'main' ? 'photo' : 'main'; break;
@@ -703,7 +763,7 @@ function action(id, fromHold = false) {
     case 'close': panel.mesh.visible = false; msg(''); break;
     case 'lock':
       if (st.locked) break;
-      st.locked = true; st.calib = null; st.grab = null; st.hold = null;
+      st.locked = true; st.calib = null; st.grab = null; st.hold = null; st.hcheck = false;
       clearMarkers();
       rig.position.copy(st.pos);
       rig.quaternion.setFromAxisAngle(UP, st.yaw);
@@ -766,8 +826,11 @@ function onFrame(t, frame) {
       const ap = frame.getPose(st.anchor.anchorSpace, refSpace);
       if (ap) {
         const p = ap.transform.position, o = ap.transform.orientation;
-        rig.position.set(p.x, p.y, p.z);
-        rig.quaternion.set(o.x, o.y, o.z, o.w);
+        aPos.set(p.x, p.y, p.z);
+        aQuat.set(o.x, o.y, o.z, o.w);
+        // микродрожь якоря (<0.7 мм) игнорируем, мелкие поправки плавно, большие сразу
+        const k = st.anchorSeen ? anchorBlend(rig.position.distanceTo(aPos), rig.quaternion.angleTo(aQuat), dt) : 1;
+        if (k > 0) { rig.position.lerp(aPos, k); rig.quaternion.slerp(aQuat, k); }
         if (!st.anchorSeen) { st.anchorSeen = true; st.anchorStatus = 'держит ✓'; panel.dirty = true; }
       }
     } else if (st.anchorStatus !== 'ищет…') { st.anchorStatus = 'ищет…'; panel.dirty = true; }
@@ -782,7 +845,8 @@ function onFrame(t, frame) {
   if (imgMat.map !== map) { imgMat.map = map; imgMat.needsUpdate = true; }
   imgMat.opacity = st.opacity;
 
-  for (const c of ctrls) updateController(c, dt, now);
+  st.headDist = st.head.distanceTo(rig.position);
+  for (const c of ctrls) { recordTip(c, now); updateController(c, dt, now); }
   updateHold(now);
   updateHands(dt);
   markers.visible = !!st.calib || now < st.markersUntil;
@@ -824,7 +888,7 @@ export async function startXR(o) {
   Object.assign(st, {
     shape: o.shape, diam: o.diameterCm / 100, opacity: o.opacity, view: 'main', hidden: false,
     locked: false, anchor: null, anchorSeen: false, wantAnchor: false, anchorStatus: '—', calib: null,
-    initialized: false, measured: false, grab: null, hold: null, msg: '', msgUntil: 0,
+    initialized: false, measured: false, grab: null, hold: null, msg: '', msgUntil: 0, hcheck: false,
   });
   imgMat.map = texMain; imgMat.needsUpdate = true;
   drawGuides();

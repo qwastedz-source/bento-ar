@@ -74,3 +74,65 @@ test('tooClose: защита от двойного нажатия', () => {
   assert.equal(tooClose(pts, { x: 0.03, y: 0, z: 0 }), false);
   near(flatDist({ x: 0, z: 0 }, { x: 3, z: 4 }), 5);
 });
+
+// ---------- точность: МНК-круг, медиана, сглаживание якоря ----------
+import { fitCircleLSQ, median, medianPoint, anchorBlend } from '../calib.js';
+
+// детерминированный «шум» ±amp
+function noise(seed, amp) { let s = seed; return () => { s = (s * 16807) % 2147483647; return ((s / 2147483647) * 2 - 1) * amp; }; }
+
+test('fitCircleLSQ: 3 точки = точный круг, rms 0', () => {
+  const c = fitCircleLSQ([onCircle(0.1, -0.4, 0.05, 0), onCircle(0.1, -0.4, 0.05, 2), onCircle(0.1, -0.4, 0.05, 4)]);
+  near(c.x, 0.1, 1e-9); near(c.z, -0.4, 1e-9); near(c.r, 0.05, 1e-9); near(c.rms, 0, 1e-9);
+});
+
+test('fitCircleLSQ: 8 точек с дрожанием ±1.5 мм → центр точнее 1 мм', () => {
+  const n = noise(7, 0.0015);
+  const pts = Array.from({ length: 8 }, (_, i) => {
+    const p = onCircle(0.02, -0.42, 0.055, (i / 8) * Math.PI * 2);
+    return { x: p.x + n(), y: p.y, z: p.z + n() };
+  });
+  const c = fitCircleLSQ(pts);
+  assert.ok(Math.hypot(c.x - 0.02, c.z + 0.42) < 0.001, 'центр');
+  near(c.r, 0.055, 0.001);
+  assert.ok(c.rms > 0 && c.rms < 0.002);
+});
+
+test('fitRim: больше точек → точнее, чем по трём', () => {
+  const n = noise(11, 0.002);
+  const all = Array.from({ length: 8 }, (_, i) => {
+    const p = onCircle(0, -0.4, 0.05, (i / 8) * Math.PI * 2 + 0.3);
+    return { x: p.x + n(), y: 0.8, z: p.z + n() };
+  });
+  const err = (r) => Math.hypot(r.x, r.z + 0.4);
+  const e3 = [0, 3, 5].map((i) => all[i]);
+  assert.ok(err(fitRim(all, head)) <= err(fitRim(e3, head)) + 1e-12);
+});
+
+test('fitRim: промах мимо края отбрасывается', () => {
+  const pts = [0, 1.5, 3, 4.5].map((a) => onCircle(0, -0.4, 0.05, a));
+  pts.push({ x: 0, y: 0.8, z: -0.4 }); // точка в центре, не на краю
+  const r = fitRim(pts, head);
+  assert.ok(r.error && r.miss);
+});
+
+test('fitRim: высота — медиана, один выброс не портит', () => {
+  const pts = [0, 1.6, 3.2, 4.8].map((a, i) => onCircle(0, -0.4, 0.05, a, [0.80, 0.801, 0.80, 0.83][i]));
+  near(fitRim(pts, head).y, 0.8005, 1e-9);
+});
+
+test('median / medianPoint', () => {
+  assert.equal(median([3, 1, 2]), 2);
+  assert.equal(median([4, 1, 3, 2]), 2.5);
+  assert.ok(Number.isNaN(median([])));
+  const m = medianPoint([{ x: 0, y: 0, z: 0 }, { x: 1, y: 5, z: 1 }, { x: 0.1, y: 0.1, z: 9 }]);
+  assert.deepEqual(m, { x: 0.1, y: 0.1, z: 1 }); // рывок (5 и 9) погашен
+});
+
+test('anchorBlend: дрожь игнор, поправка плавно, скачок сразу', () => {
+  assert.equal(anchorBlend(0.0003, 0.001, 1 / 72), 0);
+  const k = anchorBlend(0.003, 0, 1 / 72);
+  assert.ok(k > 0 && k < 0.2, `плавно: ${k}`);
+  assert.equal(anchorBlend(0.05, 0, 1 / 72), 1);
+  assert.ok(anchorBlend(0, 0.01, 1 / 72) > 0, 'поворот тоже учитывается');
+});

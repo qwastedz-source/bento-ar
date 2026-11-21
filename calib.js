@@ -29,12 +29,67 @@ export function circle3(a, b, c) {
 
 export function tooClose(pts, p) { return pts.some((q) => flatDist(q, p) < MIN_POINT_GAP); }
 
-/** Круглый торт по 3 точкам края → { x, y, z, diam, yaw } или { error }. */
+export function median(arr) {
+  const a = [...arr].sort((p, q) => p - q), n = a.length;
+  if (!n) return NaN;
+  return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2;
+}
+/** Медиана по осям: гасит дрожание руки и рывок при нажатии курка. */
+export function medianPoint(samples) {
+  return { x: median(samples.map((s) => s.x)), y: median(samples.map((s) => s.y)), z: median(samples.map((s) => s.z)) };
+}
+
+function solve3(M, b) {
+  const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+    - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+    + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d = det(M);
+  if (Math.abs(d) < 1e-18) return null;
+  return [0, 1, 2].map((k) => det(M.map((row, i) => row.map((v, j) => (j === k ? b[i] : v)))) / d);
+}
+
+/** Окружность по 3+ точкам методом наименьших квадратов (Kåsa). rms — разброс точек от круга, м. */
+export function fitCircleLSQ(pts) {
+  const n = pts.length;
+  if (n < 3) return null;
+  let mx = 0, mz = 0;
+  for (const p of pts) { mx += p.x; mz += p.z; }
+  mx /= n; mz /= n;
+  let sxx = 0, sxz = 0, szz = 0, sx = 0, sz = 0, sxr = 0, szr = 0, sr = 0;
+  for (const p of pts) {
+    const x = p.x - mx, z = p.z - mz, r = x * x + z * z;
+    sxx += x * x; sxz += x * z; szz += z * z; sx += x; sz += z; sxr += x * r; szr += z * r; sr += r;
+  }
+  const sol = solve3([[sxx, sxz, sx], [sxz, szz, sz], [sx, sz, n]], [-sxr, -szr, -sr]);
+  if (!sol) return null;
+  const [D, E, F] = sol;
+  const cx = -D / 2, cz = -E / 2, r2 = cx * cx + cz * cz - F;
+  if (!(r2 > 0)) return null;
+  const r = Math.sqrt(r2);
+  let ss = 0;
+  for (const p of pts) { const e = Math.hypot(p.x - mx - cx, p.z - mz - cz) - r; ss += e * e; }
+  return { x: cx + mx, z: cz + mz, r, rms: Math.sqrt(ss / n) };
+}
+
+export const RIM_RMS_MAX = 0.005; // точка дальше 5 мм от круга считается промахом
+
+/** Круглый торт по 3+ точкам края → { x, y, z, diam, yaw, rms } или { error }. */
 export function fitRim(pts, head) {
-  const c = pts.length === 3 ? circle3(pts[0], pts[1], pts[2]) : null;
+  const c = fitCircleLSQ(pts);
   if (!c || c.r < RIM_R_MIN || c.r > RIM_R_MAX) return { error: 'Точки не похожи на край торта, давай заново' };
-  const y = (pts[0].y + pts[1].y + pts[2].y) / 3;
-  return { x: c.x, y, z: c.z, diam: 2 * c.r, yaw: faceYaw({ x: c.x, z: c.z }, head) };
+  if (pts.length > 3 && c.rms > RIM_RMS_MAX) return { error: 'Эта точка мимо края, не засчитана', miss: true };
+  const y = median(pts.map((p) => p.y));
+  return { x: c.x, y, z: c.z, diam: 2 * c.r, yaw: faceYaw({ x: c.x, z: c.z }, head), rms: c.rms };
+}
+
+/**
+ * Насколько подтянуть картинку к новой позе якоря: 0 = не трогать (микродрожь),
+ * 1 = прыгнуть сразу (большая коррекция), иначе плавно.
+ */
+export function anchorBlend(dist, ang, dt, { eps = 0.0007, epsAng = 0.002, snap = 0.03, tau = 0.15 } = {}) {
+  if (dist < eps && ang < epsAng) return 0;
+  if (dist > snap) return 1;
+  return 1 - Math.exp(-dt / tau);
 }
 
 /** Квадратный торт по двум ближним углам (в любом порядке) → { x, y, z, diam, yaw } или { error }. */
