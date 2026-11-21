@@ -154,6 +154,7 @@ $('#file').addEventListener('change', async (e) => {
 });
 
 // ---------- старт ----------
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 let start = location.hash.slice(1);
 if (!isValidCode(normalizeCode(start))) { try { start = localStorage.getItem(LS_CODE) || ''; } catch { start = ''; } }
 if (start) setCode(start); else cells[0].focus();

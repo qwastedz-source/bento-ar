@@ -1,4 +1,4 @@
-import { processAll } from './imageproc.js';
+import { processAll, clampSettings } from './imageproc.js';
 import { listImages, addImage, touchImage, deleteImage } from './store.js';
 import { makeCode, isValidCode, sendUrl, startReceiver, loadScript, QR_URL } from './transfer.js';
 
@@ -20,7 +20,7 @@ const DEF = {
   invert: false, color: '#00ff6a', opacity: 0.85,
 };
 const COLORS = ['#00ff6a', '#ff2bd6', '#00e5ff', '#ffe600', '#ff3b30', '#2f6bff', '#000000', '#ffffff'];
-const S = { ...DEF, ...(LS.get(LS_SET) || {}) };
+const S = clampSettings({ ...DEF, ...(LS.get(LS_SET) || {}) });
 
 let img = null;
 let currentId = null;
@@ -136,6 +136,8 @@ function render(N) {
   const t0 = performance.now();
   result = processAll(img, params(), N);
   drawPreview();
+  // в AR любое изменение (фото с телефона, меню в шлеме) сразу уходит на торт
+  if (N >= 1024 && xr?.isActive?.()) xr.updateImages(result.main, result.photo);
   if (N >= 1024) $('#info').textContent = `${(S.diameter * 10 / N).toFixed(2)} мм/px · ${Math.round(performance.now() - t0)} мс`;
 }
 function schedule(fast) {
@@ -360,13 +362,48 @@ async function onPhoneImage(blob, name) {
   await useBlob(blob, name);
   toast(`Фото с телефона: ${name}`);
   if ($('#phoneDlg').open) $('#phoneDlg').close();
-  if (xr?.isActive?.()) {
-    clearTimeout(timer);
-    render(1024);
-    xr.updateImages(result.main, result.photo);
-    xr.notify('Новая картинка с телефона');
-  }
+  if (xr?.isActive?.()) xr.notify('Новая картинка с телефона');
 }
+
+// ---------- мостик для меню в шлеме ----------
+async function recentForXR() {
+  let recs = [];
+  try { recs = await listImages(); } catch {}
+  const out = [];
+  for (const r of recs.slice(0, 8)) {
+    try {
+      const bmp = await createImageBitmap(r.blob);
+      const c = document.createElement('canvas');
+      c.width = c.height = 240;
+      const s = Math.max(240 / bmp.width, 240 / bmp.height);
+      c.getContext('2d').drawImage(bmp, (240 - bmp.width * s) / 2, (240 - bmp.height * s) / 2, bmp.width * s, bmp.height * s);
+      bmp.close?.();
+      out.push({ id: r.id, img: c, current: r.id === currentId });
+    } catch {}
+  }
+  return out;
+}
+async function pickRecentForXR(id) {
+  const rec = (await listImages()).find((r) => r.id === id);
+  if (!rec) throw new Error('нет картинки');
+  const url = URL.createObjectURL(rec.blob);
+  try { img = await loadImage(url); } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  currentId = rec.id;
+  touchImage(rec).catch(() => {});
+  S.zoom = 1; S.offX = 0; S.offY = 0; S.rot = 0;
+  save(); syncUI();
+  clearTimeout(timer);
+  render(1024);
+  renderTiles();
+}
+const xrBridge = {
+  colors: COLORS,
+  getRecent: recentForXR,
+  pickRecent: pickRecentForXR,
+  getStencil: () => ({ mode: S.mode, thick: S.thick, thr: S.thr, color: S.color }),
+  setStencil: (patch) => { Object.assign(S, clampSettings({ ...S, ...patch })); changed(); },
+  phoneCode: () => (receiver ? phoneCode : null),
+};
 function startPhone() {
   if (!isValidCode(phoneCode)) { phoneCode = makeCode(); LS.set(LS_CODE, phoneCode); }
   receiver?.stop();
@@ -431,11 +468,13 @@ $('#enterAR').onclick = async () => {
   if (!mod) { toast('Не загрузился 3D-движок, обнови страницу'); return; }
   try {
     await mod.startXR({
+      ...xrBridge,
       main: result.main, photo: result.photo, shape: S.shape, diameterCm: S.diameter, opacity: S.opacity,
       onEnd: (r) => {
         S.opacity = r.opacity;
         if (r.diameterCm) S.diameter = Math.round(r.diameterCm * 10) / 10;
         changed();
+        toast(r.saved ? 'Положение сохранено: при следующем входе вернётся само' : 'Ты вышла из AR');
       },
     });
   } catch (e) {
@@ -443,6 +482,19 @@ $('#enterAR').onclick = async () => {
     toast('Не удалось запустить AR: ' + (e?.message || e));
   }
 };
+
+// ---------- установка как приложение ----------
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#installBtn').hidden = false; });
+window.addEventListener('appinstalled', () => { $('#installBtn').hidden = true; toast('Приложение установлено'); });
+$('#installBtn').onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  try { await installEvt.userChoice; } catch {}
+  installEvt = null;
+  $('#installBtn').hidden = true;
+};
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
 // ---------- старт ----------
 syncUI();

@@ -5,6 +5,24 @@ const maskCache = new Map();
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
+export const MODES = ['lines', 'mix', 'fill', 'photo'];
+export const LIMITS = {
+  diameter: [6, 20], zoom: [0.2, 3], rot: [-180, 180], offX: [-1.5, 1.5], offY: [-1.5, 1.5],
+  thr: [0.03, 0.5], blur: [0, 8], thick: [0.3, 3], minLen: [0, 15],
+  fillThr: [10, 245], fillAlpha: [0.15, 1], opacity: [0.1, 1],
+};
+/** Привести настройки в допустимые рамки (битый localStorage, кнопки в шлеме). */
+export function clampSettings(s) {
+  const o = { ...s };
+  for (const [k, [a, b]] of Object.entries(LIMITS)) {
+    if (k in o) o[k] = Number.isFinite(+o[k]) ? clamp(+o[k], a, b) : a;
+  }
+  if (!MODES.includes(o.mode)) o.mode = 'lines';
+  if (o.shape !== 'square') o.shape = 'circle';
+  if (typeof o.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(o.color)) o.color = '#00ff6a';
+  return o;
+}
+
 export function hexToRgb(hex) {
   const h = hex.replace('#', '');
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];

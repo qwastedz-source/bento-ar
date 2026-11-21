@@ -1,6 +1,7 @@
 // WebXR-часть: passthrough, калибровка по торту, заморозка с системным якорем.
 import * as THREE from 'three';
 import { faceYaw as faceYawFrom, fitRim, fitSquare, fitCenter, tooClose, medianPoint, anchorBlend } from './calib.js';
+import { layout, hitButton, coverRect } from './layout.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEG = Math.PI / 180;
@@ -73,34 +74,66 @@ function fitFont(g, text, maxW, size, weight) {
     s -= 2;
   }
 }
-function layout(rows, x0, y0, w, h, gap) {
-  const total = rows.reduce((s, r) => s + r.h, 0);
-  const unit = (h - gap * (rows.length - 1)) / total;
-  const out = [];
-  let y = y0;
-  for (const r of rows) {
-    const rh = r.h * unit;
-    const tf = r.items.reduce((s, it) => s + (it.flex || 1), 0);
-    const uw = (w - gap * (r.items.length - 1)) / tf;
-    let x = x0;
-    for (const it of r.items) {
-      const bw = (it.flex || 1) * uw;
-      out.push({ ...it, x, y, w: bw, h: rh });
-      x += bw + gap;
+const DEFAULT_COLORS = ['#00ff6a', '#ff2bd6', '#00e5ff', '#ffe600', '#ff3b30', '#2f6bff', '#000000', '#ffffff'];
+const B = (id, label, o = {}) => ({ id, label, flex: 1, ...o });
+
+// Страницы меню (картинку и трафарет можно менять и в заморозке: положение не трогается)
+function buildRows() {
+  switch (st.page) {
+    case 'menu':
+      return [
+        { h: 1.3, items: [B('images', 'Картинки'), B('stencil', 'Трафарет')] },
+        { h: 1, items: [B('calibMenu', 'Калибровка заново', { disabled: st.locked }), B('hcheckMenu', 'Проверка высоты', { disabled: st.locked })] },
+        { h: 1.3, items: [B('back', '‹ Продолжить', { kind: 'primary' }), B('exitAsk', 'Выйти из AR', { kind: 'warn' })] },
+      ];
+    case 'exit':
+      return [
+        { h: 1.1, items: [B('lbl', st.locked
+          ? 'Положение сохранится и вернётся само при следующем входе'
+          : 'Картинка не заморожена, положение не сохранится', { kind: 'label' })] },
+        { h: 1.5, items: [B('exitYes', 'Да, выйти', { kind: 'warn' }), B('back', 'Остаться', { kind: 'primary' })] },
+      ];
+    case 'images': {
+      const rows = [];
+      if (!st.recent) rows.push({ h: 3.2, items: [B('lbl', 'Загружаю…', { kind: 'label' })] });
+      else if (!st.recent.length) rows.push({ h: 3.2, items: [B('lbl', 'Пока пусто: пришли фото с телефона', { kind: 'label' })] });
+      else {
+        for (let i = 0; i < Math.min(8, st.recent.length); i += 4) {
+          const items = st.recent.slice(i, i + 4).map((r) => B('pick:' + r.id, '', { thumb: r.img, active: r.current }));
+          while (items.length < 4) items.push(B('lbl', '', { kind: 'label' }));
+          rows.push({ h: 1.6, items });
+        }
+        if (rows.length === 1) rows.push({ h: 1.6, items: [B('lbl', '', { kind: 'label' })] });
+      }
+      const code = opts?.phoneCode?.();
+      rows.push({ h: 0.7, items: [B('lbl', code ? `С телефона: код ${code}, фото появится сразу` : 'С телефона: включи «С телефона» на странице', { kind: 'label' })] });
+      rows.push({ h: 1, items: [B('toMenu', '‹ Меню'), B('back', 'К торту', { kind: 'primary' })] });
+      return rows;
     }
-    y += rh + gap;
+    case 'stencil': {
+      const s = st.stencil || {};
+      const lines = s.mode === 'lines' || s.mode === 'mix';
+      const modes = [['lines', 'Контур'], ['mix', 'Контур+фото'], ['fill', 'Пятна'], ['photo', 'Фото']];
+      return [
+        { h: 1, items: modes.map(([v, l]) => B('mode:' + v, l, { active: s.mode === v })) },
+        { h: 1, items: [B('thick-', 'Тоньше', { disabled: !lines }), B('lbl', lines ? `линия ${(+s.thick || 0).toFixed(1)} мм` : 'толщина: только для контура', { kind: 'label', flex: 1.3 }), B('thick+', 'Толще', { disabled: !lines })] },
+        { h: 1, items: [B('thr+', 'Меньше линий', { disabled: !lines }), B('thr-', 'Больше линий', { disabled: !lines })] },
+        { h: 1, items: (opts?.colors || DEFAULT_COLORS).map((c) => B('color:' + c, '', { swatch: c, active: s.color === c, disabled: s.mode === 'photo' })) },
+        { h: 1, items: [B('toMenu', '‹ Меню'), B('back', 'К торту', { kind: 'primary' })] },
+      ];
+    }
+    default:
+      return buildMainRows();
   }
-  return out;
 }
 
-function buildRows() {
-  const B = (id, label, o = {}) => ({ id, label, flex: 1, ...o });
+function buildMainRows() {
   const view = B('view', st.view === 'main' ? 'Показ: трафарет' : 'Показ: фото', { flex: 1.5, disabled: !st.hasPhoto });
   const hide = B('hide', st.hidden ? 'Показать' : 'Скрыть', { active: st.hidden });
   const opRow = { h: 1, items: [B('opMinus', 'Прозр −'), B('opPlus', 'Прозр +'), view, hide] };
   const togRow = { h: 1, items: [B('rim', 'Обод', { active: prefs.showRim }), B('grid', 'Сетка', { active: prefs.showGrid }), B('occl', 'Руки поверх', { active: prefs.occl, flex: 1.3 })] };
   if (st.locked) {
-    return [opRow, togRow, { h: 1.7, items: [B('unlock', 'Разморозить: держи 1.5 с', { flex: 2.4, hold: true, kind: 'warn' }), B('close', 'Убрать панель')] }];
+    return [opRow, togRow, { h: 1.7, items: [B('unlock', 'Разморозить: держи 1.5 с', { flex: 2.4, hold: true, kind: 'warn' }), B('menu', 'Меню'), B('close', 'Убрать')] }];
   }
   const sq = st.shape === 'square';
   const r1 = [
@@ -119,13 +152,21 @@ function buildRows() {
     { h: 1, items: [B('rotL', `↺ ${s}°`), B('rotR', `↻ ${s}°`), B('up', 'Выше'), B('down', 'Ниже'), B('smaller', 'Ø −'), B('bigger', 'Ø +')] },
     opRow,
     togRow,
-    { h: 1.5, items: [B('lock', 'ЗАМОРОЗИТЬ', { flex: 2.4, kind: 'primary' }), B('close', 'Убрать панель')] },
+    { h: 1.5, items: [B('lock', 'ЗАМОРОЗИТЬ', { flex: 2.4, kind: 'primary' }), B('menu', 'Меню'), B('close', 'Убрать')] },
   ];
 }
 
 function statusLines(now) {
   const d = (st.diam * 100).toFixed(1);
   const op = Math.round(st.opacity * 100);
+  const flash = st.msg && now < st.msgUntil ? st.msg : null;
+  const PAGES = {
+    menu: ['Меню', 'Картинку и трафарет можно менять: положение не собьётся'],
+    images: ['Картинки', 'Нажми на картинку, и она встанет на торт'],
+    stencil: ['Трафарет', 'Изменения сразу видны на торте'],
+    exit: ['Выйти из AR?', 'Вернёшься на страницу с настройками'],
+  };
+  if (PAGES[st.page]) return [PAGES[st.page][0], flash || PAGES[st.page][1]];
   let l1, l2;
   const dist = Math.round(st.headDist * 100);
   if (st.locked) {
@@ -163,7 +204,7 @@ class Panel {
     this.ctx = this.canvas.getContext('2d');
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    this.tex.anisotropy = renderer ? renderer.capabilities.getMaxAnisotropy() : 1;
     const w = 0.27;
     this.mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, (w * this.H) / this.W),
@@ -183,15 +224,20 @@ class Panel {
     const hit = raycaster.intersectObject(this.mesh, false)[0];
     if (!hit || !hit.uv) return null;
     const px = hit.uv.x * this.W, py = (1 - hit.uv.y) * this.H;
-    const button = this.buttons.find((b) => px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h && !b.disabled);
-    return { distance: hit.distance, button };
+    return { distance: hit.distance, button: hitButton(this.buttons, px, py) };
   }
   update(now) {
     if (!this.mesh.visible) return;
+    if (this.anim != null) {
+      const k = Math.min(1, (now - this.anim) / 200), e = 1 - (1 - k) ** 3;
+      this.mesh.scale.setScalar(0.86 + 0.14 * e);
+      this.mesh.material.opacity = e;
+      if (k >= 1) this.anim = null;
+    }
     const hover = ctrls.map((c) => c.userData.hoverId).filter(Boolean).join(',');
     const holdP = st.hold ? Math.min(1, (now - st.hold.t0) / HOLD_MS) : 0;
     const lines = statusLines(now);
-    const key = [st.locked, st.calib?.mode, st.calib?.pts.length, !!st.calib?.fit, st.hcheck, st.canRestore, prefs.step, st.view, st.hidden,
+    const key = [st.page, st.recent?.length, JSON.stringify(st.stencil || 0), st.locked, st.calib?.mode, st.calib?.pts.length, !!st.calib?.fit, st.hcheck, st.canRestore, prefs.step, st.view, st.hidden,
       prefs.showRim, prefs.showGrid, prefs.occl, hover, holdP.toFixed(2), lines.join('|')].join(';');
     if (!this.dirty && key === this.key) return;
     if (now - this.lastDraw < 60) return;
@@ -227,8 +273,16 @@ class Panel {
 
     this.buttons = layout(buildRows(), 24, 144, W - 48, H - 144 - 24, 14);
     for (const b of this.buttons) {
+      if (b.kind === 'label') {
+        if (!b.label) continue;
+        g.textAlign = 'center';
+        g.fillStyle = 'rgba(255,255,255,0.72)';
+        fitFont(g, b.label, b.w - 24, 34, 600);
+        g.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 2);
+        continue;
+      }
       let fill = '#2b2a33', top = 'rgba(255,255,255,0.07)';
-      if (b.active) { fill = '#0f8f6a'; top = 'rgba(255,255,255,0.14)'; }
+      if (b.active && !b.swatch) { fill = '#0f8f6a'; top = 'rgba(255,255,255,0.14)'; }
       if (b.kind === 'primary') { fill = g.createLinearGradient(0, b.y, 0, b.y + b.h); fill.addColorStop(0, '#f06595'); fill.addColorStop(1, '#c2255c'); }
       if (b.kind === 'warn') { fill = g.createLinearGradient(0, b.y, 0, b.y + b.h); fill.addColorStop(0, '#ff922b'); fill.addColorStop(1, '#d9480f'); }
       if (b.disabled) fill = '#202027';
@@ -240,11 +294,26 @@ class Panel {
         g.fillStyle = 'rgba(255,255,255,0.16)'; g.fill();
         g.lineWidth = 5; g.strokeStyle = '#ffffff'; g.stroke();
       }
+      if (b.thumb) {
+        g.save(); rr(g, b.x + 6, b.y + 6, b.w - 12, b.h - 12, 18); g.clip();
+        g.fillStyle = '#fff'; g.fillRect(b.x, b.y, b.w, b.h);
+        const c = coverRect(b.thumb.width, b.thumb.height, b.x + 6, b.y + 6, b.w - 12, b.h - 12);
+        g.drawImage(b.thumb, c.x, c.y, c.w, c.h);
+        g.restore();
+        if (b.active) { rr(g, b.x + 3, b.y + 3, b.w - 6, b.h - 6, 22); g.lineWidth = 7; g.strokeStyle = '#38d9a9'; g.stroke(); }
+      }
+      if (b.swatch) {
+        const r = Math.min(b.w, b.h) * 0.3;
+        g.beginPath(); g.arc(b.x + b.w / 2, b.y + b.h / 2, r, 0, Math.PI * 2);
+        g.fillStyle = b.disabled ? 'rgba(255,255,255,0.15)' : b.swatch; g.fill();
+        g.lineWidth = b.active ? 7 : 2; g.strokeStyle = b.active ? '#ffffff' : 'rgba(255,255,255,0.35)'; g.stroke();
+      }
       if (b.hold && st.hold && st.hold.id === b.id && holdP > 0) {
         g.save(); rr(g, b.x, b.y, b.w, b.h, 22); g.clip();
         g.fillStyle = 'rgba(255,255,255,0.4)'; g.fillRect(b.x, b.y, b.w * holdP, b.h);
         g.restore();
       }
+      if (!b.label) continue;
       g.textAlign = 'center';
       g.fillStyle = b.disabled ? 'rgba(255,255,255,0.35)' : '#ffffff';
       fitFont(g, b.label, b.w - 24, b.kind ? 48 : 38, 650);
@@ -260,14 +329,16 @@ function placePanelInFront() {
     .addScaledVector(st.headFwd, 0.42)
     .addScaledVector(r, -0.2)
     .add(v1.set(0, -0.13, 0));
-  panel.mesh.lookAt(st.head);
-  panel.mesh.visible = true;
-  panel.dirty = true;
+  showPanel();
 }
 function placePanelAt(p) {
   panel.mesh.position.copy(p);
+  showPanel();
+}
+function showPanel() {
   panel.mesh.lookAt(st.head);
   panel.mesh.visible = true;
+  panel.anim = performance.now();
   panel.dirty = true;
 }
 
@@ -724,10 +795,48 @@ async function restorePersistent() {
 // =====================================================================
 // Действия кнопок
 // =====================================================================
+function setStencil(patch) {
+  st.stencil = { ...(st.stencil || {}), ...patch };
+  try { opts?.setStencil?.(patch); } catch {}
+  panel.dirty = true;
+}
+
 function action(id, fromHold = false) {
   const s = prefs.step / 1000;
   const free = !st.locked;
+  const colon = id.indexOf(':');
+  if (colon > 0) {
+    const k = id.slice(0, colon), v = id.slice(colon + 1);
+    if (k === 'pick') {
+      msg('Ставлю картинку…', 5000);
+      Promise.resolve(opts?.pickRecent?.(v))
+        .then(() => { st.page = 'main'; msg('Картинка заменена'); })
+        .catch(() => msg('Не получилось открыть картинку'));
+    } else if (k === 'mode') setStencil({ mode: v });
+    else if (k === 'color') setStencil({ color: v });
+    panel.dirty = true;
+    return;
+  }
+  const sc = st.stencil || {};
   switch (id) {
+    case 'menu': st.page = 'menu'; st.calib = null; st.hcheck = false; break;
+    case 'back': st.page = 'main'; break;
+    case 'toMenu': st.page = 'menu'; break;
+    case 'images':
+      st.page = 'images';
+      st.recent = null;
+      Promise.resolve(opts?.getRecent?.()).then((r) => { st.recent = r || []; panel.dirty = true; })
+        .catch(() => { st.recent = []; panel.dirty = true; });
+      break;
+    case 'stencil': st.page = 'stencil'; st.stencil = opts?.getStencil?.() || {}; break;
+    case 'calibMenu': if (free) { st.page = 'main'; st.calib = { mode: 'rim', pts: [] }; clearMarkers(); } break;
+    case 'hcheckMenu': if (free) { st.page = 'main'; st.hcheck = true; } break;
+    case 'exitAsk': st.page = 'exit'; break;
+    case 'exitYes': try { session?.end(); } catch {} break;
+    case 'thick-': setStencil({ thick: Math.max(0.3, Math.round(((+sc.thick || 0.8) - 0.2) * 10) / 10) }); break;
+    case 'thick+': setStencil({ thick: Math.min(3, Math.round(((+sc.thick || 0.8) + 0.2) * 10) / 10) }); break;
+    case 'thr+': setStencil({ thr: Math.min(0.5, Math.round(((+sc.thr || 0.12) + 0.03) * 100) / 100) }); break;
+    case 'thr-': setStencil({ thr: Math.max(0.03, Math.round(((+sc.thr || 0.12) - 0.03) * 100) / 100) }); break;
     case 'calibCenter': if (free) { st.calib = { mode: 'center', pts: [] }; clearMarkers(); } break;
     case 'calibRim': if (free) { st.calib = { mode: 'rim', pts: [] }; clearMarkers(); } break;
     case 'cancelCalib': st.calib = null; clearMarkers(); break;
@@ -889,6 +998,7 @@ export async function startXR(o) {
     shape: o.shape, diam: o.diameterCm / 100, opacity: o.opacity, view: 'main', hidden: false,
     locked: false, anchor: null, anchorSeen: false, wantAnchor: false, anchorStatus: '—', calib: null,
     initialized: false, measured: false, grab: null, hold: null, msg: '', msgUntil: 0, hcheck: false,
+    page: 'main', recent: null, stencil: null,
   });
   imgMat.map = texMain; imgMat.needsUpdate = true;
   drawGuides();
@@ -915,6 +1025,17 @@ export async function startXR(o) {
   if (st.canRestore && Date.now() - (saved.t || 0) < 6 * 3600e3) restorePersistent();
 }
 
+/** Для разработки: нарисовать панель шлема на обычной странице (без AR). */
+export function previewPanel(page = 'main', state = {}, bridge = {}) {
+  if (session) return null;
+  opts = { ...(opts || {}), ...bridge };
+  Object.assign(st, { page, ...state });
+  const p = new Panel();
+  panel = panel || p;
+  p.draw(statusLines(performance.now()), new Set(state.hover ? [state.hover] : []), 0);
+  return p.canvas;
+}
+
 export function isActive() { return !!session; }
 /** Измеренный в этой сессии диаметр, см (или null). */
 export function measuredDiameterCm() { return session && st.measured ? st.diam * 100 : null; }
@@ -938,9 +1059,11 @@ export function updateImages(main, photo) {
 function onEnd() {
   renderer.setAnimationLoop(null);
   try { refSpace?.removeEventListener('reset', onReset); } catch {}
+  const saved = st.locked && !!readSaved();
   st.anchor = null; // якоря сессии умирают вместе с ней, сохранённый остаётся
   st.locked = false;
+  st.page = 'main';
   session = null;
   refSpace = null;
-  opts?.onEnd?.({ opacity: st.opacity, diameterCm: st.measured ? st.diam * 100 : null });
+  opts?.onEnd?.({ opacity: st.opacity, diameterCm: st.measured ? st.diam * 100 : null, saved });
 }
