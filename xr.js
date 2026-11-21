@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { faceYaw as faceYawFrom, fitRim, fitSquare, fitCenter, tooClose, medianPoint, anchorBlend } from './calib.js';
 import { layout, hitButton, coverRect } from './layout.js';
+import { OUTLINE_MM, outlineColor } from './imageproc.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const DEG = Math.PI / 180;
@@ -28,6 +29,45 @@ for (const f of ['index-finger', 'middle-finger', 'ring-finger', 'pinky-finger']
 
 let renderer, scene, camera, session = null, refSpace = null, opts = null;
 let rig, content, imgMat, guideTex, guideCanvas, texMain = null, texPhoto = null;
+let imgMesh, lineMat, texSdf = null, lineMeta = null;
+
+// Линии рисуются из поля расстояний: край всегда в 1 экранный пиксель, без мыла и лесенки.
+const LINE_VS = /* glsl */`
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const LINE_FS = /* glsl */`
+uniform sampler2D sdf;
+uniform sampler2D photo;
+uniform vec3 color;
+uniform vec3 edge;
+uniform float halfW, edgeW, texSize, maxD, opacity, mixPhoto, circle;
+varying vec2 vUv;
+void main() {
+  float d = texture2D(sdf, vUv).r * maxD;            // расстояние до линии, текселей
+  vec2 g = fwidth(vUv * texSize);
+  float px = max(0.5 * (g.x + g.y), 1e-4);          // текселей в одном пикселе экрана
+  float hw = max(halfW, 0.6 * px);                  // тоньше пикселя не рисуем — гасим яркостью
+  float fade = clamp(halfW / hw, 0.3, 1.0);
+  float core = (1.0 - smoothstep(hw - 0.5 * px, hw + 0.5 * px, d)) * fade;
+  vec4 acc = vec4(0.0);
+  if (mixPhoto > 0.0) { vec4 p = texture2D(photo, vUv); float pa = p.a * mixPhoto; acc = vec4(p.rgb * pa, pa); }
+  if (edgeW > 0.0) {
+    float ew = max(edgeW, 0.5 * px);
+    float ring = 1.0 - smoothstep(hw + ew - 0.5 * px, hw + ew + 0.5 * px, d);
+    ring *= smoothstep(0.3 * px, 0.9 * px, edgeW);   // издалека обводка тоньше пикселя — убираем
+    acc = vec4(edge * ring, ring) + acc * (1.0 - ring);
+  }
+  acc = vec4(color * core, core) + acc * (1.0 - core);
+  if (circle > 0.5) {
+    float r = length(vUv - 0.5) * 2.0;
+    float aa = max(fwidth(r), 1e-4);
+    acc *= 1.0 - smoothstep(1.0 - aa, 1.0, r);
+  }
+  acc *= opacity;
+  if (acc.a < 0.002) discard;
+  gl_FragColor = vec4(acc.rgb / acc.a, acc.a);
+  #include <colorspace_fragment>
+}`;
 let panel, markers;
 const ctrls = [];
 const hands = [];
@@ -116,7 +156,7 @@ function buildRows() {
       const modes = [['lines', 'Контур'], ['mix', 'Контур+фото'], ['fill', 'Пятна'], ['photo', 'Фото']];
       return [
         { h: 1, items: modes.map(([v, l]) => B('mode:' + v, l, { active: s.mode === v })) },
-        { h: 1, items: [B('thick-', 'Тоньше', { disabled: !lines }), B('lbl', lines ? `линия ${(+s.thick || 0).toFixed(1)} мм` : 'толщина: только для контура', { kind: 'label', flex: 1.3 }), B('thick+', 'Толще', { disabled: !lines })] },
+        { h: 1, items: [B('thick-', 'Тоньше', { disabled: !lines }), B('lbl', lines ? `линия ${(+s.thick || 0).toFixed(1)} мм` : 'толщина: только для контура', { kind: 'label', flex: 1.3 }), B('thick+', 'Толще', { disabled: !lines }), B('outline', 'Обводка', { active: !!s.outline, disabled: !lines })] },
         { h: 1, items: [B('thr+', 'Меньше линий', { disabled: !lines }), B('thr-', 'Больше линий', { disabled: !lines })] },
         { h: 1, items: (opts?.colors || DEFAULT_COLORS).map((c) => B('color:' + c, '', { swatch: c, active: s.color === c, disabled: s.mode === 'photo' })) },
         { h: 1, items: [B('toMenu', '‹ Меню'), B('back', 'К торту', { kind: 'primary' })] },
@@ -359,6 +399,45 @@ function dataTex(imgData) {
   return t;
 }
 
+function sdfTex(s) {
+  const N = s.width, buf = new Uint8Array(N * N);
+  for (let y = 0; y < N; y++) buf.set(s.data.subarray((N - 1 - y) * N, (N - y) * N), y * N);
+  const t = new THREE.DataTexture(buf, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+  t.colorSpace = THREE.NoColorSpace;
+  t.unpackAlignment = 1;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.needsUpdate = true;
+  return t;
+}
+function setLineData(sdf, meta) {
+  if (texSdf) texSdf.dispose();
+  texSdf = sdf ? sdfTex(sdf) : null;
+  lineMeta = sdf && meta ? { ...meta, N: sdf.width, maxD: sdf.maxD } : null;
+  if (lineMeta) applyLineMeta();
+}
+function applyLineMeta() {
+  const u = lineMat.uniforms;
+  u.sdf.value = texSdf;
+  u.photo.value = texPhoto;
+  u.texSize.value = lineMeta.N;
+  u.maxD.value = lineMeta.maxD;
+  u.color.value.set(lineMeta.color);
+  u.edge.value.set(outlineColor(lineMeta.color));
+  u.mixPhoto.value = lineMeta.mode === 'mix' ? 0.45 : 0;
+  u.circle.value = st.shape === 'square' ? 0 : 1;
+}
+// толщина в мм остаётся настоящей, даже если диаметр поменяли в шлеме
+function updateLineUniforms() {
+  const u = lineMat.uniforms;
+  const mmPerPx = (st.diam * 1000) / lineMeta.N;
+  u.halfW.value = Math.max(0.5, lineMeta.thickMm / mmPerPx / 2);
+  u.edgeW.value = lineMeta.outline ? OUTLINE_MM / mmPerPx : 0;
+  u.opacity.value = st.opacity;
+}
+
 function drawGuides() {
   const g = guideCanvas.getContext('2d'), N = guideCanvas.width, c = N / 2;
   g.clearRect(0, 0, N, N);
@@ -416,7 +495,17 @@ function init() {
   rig.add(content);
   const plane = new THREE.PlaneGeometry(1, 1);
   imgMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
-  const imgMesh = new THREE.Mesh(plane, imgMat);
+  lineMat = new THREE.ShaderMaterial({
+    uniforms: {
+      sdf: { value: null }, photo: { value: null },
+      color: { value: new THREE.Color('#00ff6a') }, edge: { value: new THREE.Color('#14110f') },
+      halfW: { value: 4 }, edgeW: { value: 0 }, texSize: { value: 1024 }, maxD: { value: 48 },
+      opacity: { value: 0.85 }, mixPhoto: { value: 0 }, circle: { value: 1 },
+    },
+    vertexShader: LINE_VS, fragmentShader: LINE_FS,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+  });
+  imgMesh = new THREE.Mesh(plane, imgMat);
   imgMesh.renderOrder = 1;
   content.add(imgMesh);
 
@@ -797,6 +886,13 @@ async function restorePersistent() {
 // =====================================================================
 function setStencil(patch) {
   st.stencil = { ...(st.stencil || {}), ...patch };
+  // толщину, цвет и обводку шейдер меняет мгновенно, не дожидаясь пересчёта картинки
+  if (lineMeta) {
+    if ('thick' in patch) lineMeta.thickMm = patch.thick;
+    if ('color' in patch) lineMeta.color = patch.color;
+    if ('outline' in patch) lineMeta.outline = patch.outline;
+    applyLineMeta();
+  }
   try { opts?.setStencil?.(patch); } catch {}
   panel.dirty = true;
 }
@@ -833,6 +929,7 @@ function action(id, fromHold = false) {
     case 'hcheckMenu': if (free) { st.page = 'main'; st.hcheck = true; } break;
     case 'exitAsk': st.page = 'exit'; break;
     case 'exitYes': try { session?.end(); } catch {} break;
+    case 'outline': setStencil({ outline: !sc.outline }); break;
     case 'thick-': setStencil({ thick: Math.max(0.3, Math.round(((+sc.thick || 0.8) - 0.2) * 10) / 10) }); break;
     case 'thick+': setStencil({ thick: Math.min(3, Math.round(((+sc.thick || 0.8) + 0.2) * 10) / 10) }); break;
     case 'thr+': setStencil({ thr: Math.min(0.5, Math.round(((+sc.thr || 0.12) + 0.03) * 100) / 100) }); break;
@@ -953,6 +1050,10 @@ function onFrame(t, frame) {
   const map = st.view === 'photo' ? texPhoto : texMain;
   if (imgMat.map !== map) { imgMat.map = map; imgMat.needsUpdate = true; }
   imgMat.opacity = st.opacity;
+  const useLines = st.view === 'main' && texSdf && lineMeta;
+  const mat = useLines ? lineMat : imgMat;
+  if (imgMesh.material !== mat) imgMesh.material = mat;
+  if (useLines) updateLineUniforms();
 
   st.headDist = st.head.distanceTo(rig.position);
   for (const c of ctrls) { recordTip(c, now); updateController(c, dt, now); }
@@ -1001,6 +1102,7 @@ export async function startXR(o) {
     page: 'main', recent: null, stencil: null,
   });
   imgMat.map = texMain; imgMat.needsUpdate = true;
+  setLineData(o.sdf, o.meta);
   drawGuides();
   clearMarkers();
 
@@ -1010,9 +1112,21 @@ export async function startXR(o) {
   });
   session = s;
   renderer.xr.setReferenceSpaceType('local-floor');
-  renderer.xr.setFramebufferScaleFactor(1.2);
+  // рендер в родном разрешении дисплея (или чуть выше): без этого браузер рисует ~0.8× и мылит
+  let scale = 1.4;
+  try {
+    const nat = XRWebGLLayer.getNativeFramebufferScaleFactor(s);
+    if (nat > 0) scale = Math.min(Math.max(nat * 1.1, 1.2), 1.8);
+  } catch {}
+  renderer.xr.setFramebufferScaleFactor(scale);
   await renderer.xr.setSession(s);
   try { renderer.xr.setFoveation(0); } catch {}
+  // 90 Гц: плавнее при движении головы (сцена лёгкая, запас по GPU большой)
+  try {
+    const rates = s.supportedFrameRates ? [...s.supportedFrameRates] : [];
+    const pick = rates.includes(90) ? 90 : Math.max(0, ...rates.filter((r) => r <= 90));
+    if (pick && s.updateTargetFrameRate) s.updateTargetFrameRate(pick).catch(() => {});
+  } catch {}
   refSpace = renderer.xr.getReferenceSpace();
   refSpace.addEventListener('reset', onReset);
   s.addEventListener('end', onEnd);
@@ -1036,13 +1150,42 @@ export function previewPanel(page = 'main', state = {}, bridge = {}) {
   return p.canvas;
 }
 
+/**
+ * Для разработки: отрисовать трафарет тем же шейдером, что в шлеме, на обычном canvas.
+ * zoom > 1 — смотреть на кусок крупно; sdf:false — старым способом (текстурой) для сравнения.
+ */
+export function previewStencil(res, meta, { size = 512, zoom = 1, diamCm = 10, shape = 'circle', sdf = true, bg = 0xf8efe5 } = {}) {
+  if (session) return null;
+  if (!renderer) init();
+  st.diam = diamCm / 100; st.shape = shape; st.opacity = 1;
+  const tm = dataTex(res.main);
+  texPhoto = res.photo === res.main ? tm : dataTex(res.photo);
+  setLineData(res.sdf, meta);
+  let mat;
+  if (sdf && lineMeta) { updateLineUniforms(); mat = lineMat; }
+  else mat = new THREE.MeshBasicMaterial({ map: tm, transparent: true, toneMapped: false });
+  const sc = new THREE.Scene();
+  const h = 0.5 / zoom;
+  const cam = new THREE.OrthographicCamera(-h, h, h, -h, 0.1, 10);
+  cam.position.set(zoom > 1 ? -0.13 : 0, 0, 1);
+  sc.add(new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat));
+  renderer.setSize(size, size, false);
+  renderer.setClearColor(bg, 1);
+  renderer.render(sc, cam);
+  const out = document.createElement('canvas');
+  out.width = out.height = size;
+  out.getContext('2d').drawImage(renderer.domElement, 0, 0);
+  renderer.setClearColor(0x000000, 0);
+  return out;
+}
+
 export function isActive() { return !!session; }
 /** Измеренный в этой сессии диаметр, см (или null). */
 export function measuredDiameterCm() { return session && st.measured ? st.diam * 100 : null; }
 export function notify(text) { if (session) msg(text, 4000); }
 
 /** Заменить картинку прямо в AR (пришла с телефона) — положение и заморозка не меняются. */
-export function updateImages(main, photo) {
+export function updateImages(main, photo, extra = {}) {
   if (!session) return;
   const oldMain = texMain, oldPhoto = texPhoto;
   texMain = dataTex(main);
@@ -1051,6 +1194,7 @@ export function updateImages(main, photo) {
   if (!st.hasPhoto) st.view = 'main';
   imgMat.map = st.view === 'photo' ? texPhoto : texMain;
   imgMat.needsUpdate = true;
+  setLineData(extra.sdf, extra.meta);
   if (oldPhoto && oldPhoto !== oldMain) oldPhoto.dispose();
   if (oldMain) oldMain.dispose();
   panel.dirty = true;

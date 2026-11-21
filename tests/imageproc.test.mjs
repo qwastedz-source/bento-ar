@@ -97,3 +97,63 @@ test('прозрачный фон картинки считается белым
   assert.equal(A(main, 12, 64), 0);
   assert.ok(A(main, 40, 64) > 200 || A(main, 39, 64) > 200);
 });
+
+// ---------- качество: точное поле расстояний, SDF, обводка ----------
+import { distanceTransform, encodeSdf, outlineColor, SDF_MAX } from '../imageproc.js';
+
+test('distanceTransform: точное евклидово расстояние (сверка перебором)', () => {
+  const N = 40;
+  const mask = new Uint8Array(N * N);
+  let s = 3;
+  const pts = [];
+  for (let k = 0; k < 12; k++) { s = (s * 16807) % 2147483647; const i = s % (N * N); mask[i] = 1; pts.push([i % N, Math.floor(i / N)]); }
+  const d = distanceTransform(mask, N);
+  let maxErr = 0;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const exact = Math.min(...pts.map(([px, py]) => Math.hypot(px - x, py - y)));
+    maxErr = Math.max(maxErr, Math.abs(d[y * N + x] - exact));
+  }
+  assert.ok(maxErr < 1e-4, `ошибка ${maxErr}`);
+});
+
+test('distanceTransform: диагональ ровная (старый chamfer давал до 8% ошибки)', () => {
+  const N = 64, mask = new Uint8Array(N * N);
+  mask[32 * N + 32] = 1;
+  const d = distanceTransform(mask, N);
+  assert.ok(Math.abs(d[(32 + 20) * N + 32 + 20] - Math.hypot(20, 20)) < 1e-4);
+  assert.ok(Math.abs(d[(32 + 7) * N + 32 + 19] - Math.hypot(7, 19)) < 1e-4);
+});
+
+test('encodeSdf: 0 на линии, 255 далеко, монотонно', () => {
+  const dist = new Float32Array([0, 1, 10, SDF_MAX, 500]);
+  const s = encodeSdf(dist, 1);
+  assert.equal(s.data[0], 0);
+  assert.ok(s.data[1] > 0 && s.data[1] < s.data[2]);
+  assert.equal(s.data[3], 255);
+  assert.equal(s.data[4], 255);
+  assert.equal(s.maxD, SDF_MAX);
+});
+
+test('контур отдаёт SDF для шейдера шлема', () => {
+  const r = run({});
+  assert.ok(r.sdf && r.sdf.width === N && r.sdf.data.length === N * N);
+  assert.equal(r.sdf.data[64 * N + 40] <= 8 || r.sdf.data[64 * N + 39] <= 8, true, 'на линии почти 0');
+  assert.ok(r.sdf.data[64 * N + 64] > 100, 'в центре квадрата далеко от линии');
+  assert.equal(run({ mode: 'fill' }).sdf, undefined);
+  assert.equal(run({ mode: 'photo' }).sdf, undefined);
+});
+
+test('обводка: тёмное кольцо вокруг светлой линии', () => {
+  const plain = run({ thick: 1.6, outline: false, diameter: 2.5 }).main; // мельче торт = больше пикселей на мм
+  const out = run({ thick: 1.6, outline: true, diameter: 2.5 }).main;
+  // пиксель чуть снаружи линии: без обводки прозрачный, с обводкой тёмный
+  let found = false;
+  for (let x = 30; x < 40 && !found; x++) {
+    const k = (64 * N + x) * 4;
+    if (plain.data[k + 3] === 0 && out.data[k + 3] > 150 && out.data[k] < 60 && out.data[k + 1] < 60) found = true;
+  }
+  assert.ok(found, 'есть тёмная обводка');
+  assert.equal(outlineColor('#00ff6a'), '#14110f');
+  assert.equal(outlineColor('#000000'), '#ffffff');
+  assert.equal(outlineColor('#2f6bff'), '#ffffff');
+});

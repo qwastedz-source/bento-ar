@@ -1,6 +1,6 @@
 // Офлайн-кэш: свои файлы — сначала сеть (чтобы обновления приходили сразу), при обрыве — из кэша.
 // Библиотеки с CDN и шрифты версионированы — берём из кэша.
-const VERSION = 'bk-v4';
+const VERSION = 'bk-v5';
 const CORE = [
   './', './index.html', './send.html', './styles.css', './main.js', './send.js', './imageproc.js',
   './calib.js', './layout.js', './transfer.js', './store.js', './xr.js', './manifest.webmanifest',

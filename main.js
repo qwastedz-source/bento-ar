@@ -17,7 +17,7 @@ const LS = {
 const DEF = {
   shape: 'circle', diameter: 10, zoom: 1, offX: 0, offY: 0, rot: 0, mirror: false,
   mode: 'lines', thr: 0.12, blur: 2, thick: 0.8, minLen: 2, fillThr: 110, fillAlpha: 0.5,
-  invert: false, color: '#00ff6a', opacity: 0.85,
+  invert: false, color: '#00ff6a', opacity: 0.85, outline: true,
 };
 const COLORS = ['#00ff6a', '#ff2bd6', '#00e5ff', '#ffe600', '#ff3b30', '#2f6bff', '#000000', '#ffffff'];
 const S = clampSettings({ ...DEF, ...(LS.get(LS_SET) || {}) });
@@ -132,12 +132,17 @@ function params() {
   const md = xr?.measuredDiameterCm?.();
   return md ? { ...S, diameter: md } : S;
 }
+// Что нужно шейдеру шлема, чтобы рисовать линии из поля расстояний
+function lineMeta() {
+  if (!result?.sdf) return null;
+  return { thickMm: S.thick, outline: !!S.outline, color: S.color, mode: S.mode };
+}
 function render(N) {
   const t0 = performance.now();
   result = processAll(img, params(), N);
   drawPreview();
   // в AR любое изменение (фото с телефона, меню в шлеме) сразу уходит на торт
-  if (N >= 1024 && xr?.isActive?.()) xr.updateImages(result.main, result.photo);
+  if (N >= 1024 && xr?.isActive?.()) xr.updateImages(result.main, result.photo, { sdf: result.sdf, meta: lineMeta() });
   if (N >= 1024) $('#info').textContent = `${(S.diameter * 10 / N).toFixed(2)} мм/px · ${Math.round(performance.now() - t0)} мс`;
 }
 function schedule(fast) {
@@ -400,7 +405,7 @@ const xrBridge = {
   colors: COLORS,
   getRecent: recentForXR,
   pickRecent: pickRecentForXR,
-  getStencil: () => ({ mode: S.mode, thick: S.thick, thr: S.thr, color: S.color }),
+  getStencil: () => ({ mode: S.mode, thick: S.thick, thr: S.thr, color: S.color, outline: S.outline }),
   setStencil: (patch) => { Object.assign(S, clampSettings({ ...S, ...patch })); changed(); },
   phoneCode: () => (receiver ? phoneCode : null),
 };
@@ -469,7 +474,7 @@ $('#enterAR').onclick = async () => {
   try {
     await mod.startXR({
       ...xrBridge,
-      main: result.main, photo: result.photo, shape: S.shape, diameterCm: S.diameter, opacity: S.opacity,
+      main: result.main, photo: result.photo, sdf: result.sdf, meta: lineMeta(), shape: S.shape, diameterCm: S.diameter, opacity: S.opacity,
       onEnd: (r) => {
         S.opacity = r.opacity;
         if (r.diameterCm) S.diameter = Math.round(r.diameterCm * 10) / 10;

@@ -19,6 +19,7 @@ export function clampSettings(s) {
   }
   if (!MODES.includes(o.mode)) o.mode = 'lines';
   if (o.shape !== 'square') o.shape = 'circle';
+  if ('outline' in o) o.outline = !!o.outline;
   if (typeof o.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(o.color)) o.color = '#00ff6a';
   return o;
 }
@@ -89,8 +90,8 @@ function boxBlur(src, w, h, r) {
 }
 
 // Canny-подобные линии: размытие → Собель → тонкие линии → гистерезис →
-// убрать мусор → нарастить до нужной толщины (со сглаживанием краёв).
-function lineAlpha(gray, N, p, mmPerPx) {
+// убрать мусор → расстояние до линии (толщину и края рисуют потом).
+function lineAlpha(gray, N, p, mmPerPx) { // → Float32Array расстояний, px
   const n = N * N;
   let b = gray;
   const blurR = Math.round(p.blur * (N / 1024));
@@ -164,40 +165,62 @@ function lineAlpha(gray, N, p, mmPerPx) {
     }
   }
 
-  // дистанция до линии (chamfer) → толщина с мягким краем
-  const INF = 1e9, D2 = Math.SQRT2;
-  const dist = new Float32Array(n);
-  for (let i = 0; i < n; i++) dist[i] = edge[i] ? 0 : INF;
+  return distanceTransform(edge, N);
+}
+
+// Точное евклидово расстояние до ближайшего пикселя линии (Felzenszwalb–Huttenlocher, O(n)).
+const EDT_INF = 1e20;
+function edt1d(f, n, d, v, z) {
+  let k = 0;
+  v[0] = 0; z[0] = -EDT_INF; z[1] = EDT_INF;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) {
+      k--;
+      s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    }
+    k++; v[k] = q; z[k] = s; z[k + 1] = EDT_INF;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const dq = q - v[k];
+    d[q] = dq * dq + f[v[k]];
+  }
+}
+/** mask (1 = линия) → Float32Array расстояний в пикселях. */
+export function distanceTransform(mask, N) {
+  const g = new Float64Array(N * N);
+  for (let i = 0; i < N * N; i++) g[i] = mask[i] ? 0 : EDT_INF;
+  const f = new Float64Array(N), d = new Float64Array(N), v = new Int32Array(N), z = new Float64Array(N + 1);
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) f[y] = g[y * N + x];
+    edt1d(f, N, d, v, z);
+    for (let y = 0; y < N; y++) g[y * N + x] = d[y];
+  }
+  const out = new Float32Array(N * N);
   for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      const i = y * N + x;
-      let v = dist[i];
-      if (y > 0) {
-        v = Math.min(v, dist[i - N] + 1);
-        if (x > 0) v = Math.min(v, dist[i - N - 1] + D2);
-        if (x < N - 1) v = Math.min(v, dist[i - N + 1] + D2);
-      }
-      if (x > 0) v = Math.min(v, dist[i - 1] + 1);
-      dist[i] = v;
-    }
+    const row = y * N;
+    for (let x = 0; x < N; x++) f[x] = g[row + x];
+    edt1d(f, N, d, v, z);
+    for (let x = 0; x < N; x++) out[row + x] = Math.sqrt(d[x]);
   }
-  for (let y = N - 1; y >= 0; y--) {
-    for (let x = N - 1; x >= 0; x--) {
-      const i = y * N + x;
-      let v = dist[i];
-      if (y < N - 1) {
-        v = Math.min(v, dist[i + N] + 1);
-        if (x > 0) v = Math.min(v, dist[i + N - 1] + D2);
-        if (x < N - 1) v = Math.min(v, dist[i + N + 1] + D2);
-      }
-      if (x < N - 1) v = Math.min(v, dist[i + 1] + 1);
-      dist[i] = v;
-    }
-  }
-  const R = Math.max(0.5, p.thick / mmPerPx / 2);
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = clamp(R + 0.5 - dist[i], 0, 1);
   return out;
+}
+
+// Поле расстояний для шейдера: 0..SDF_MAX пикселей → 0..255.
+export const SDF_MAX = 48;
+export function encodeSdf(dist, N) {
+  const data = new Uint8Array(dist.length);
+  for (let i = 0; i < dist.length; i++) data[i] = Math.round((Math.min(dist[i], SDF_MAX) / SDF_MAX) * 255);
+  return { width: N, data, maxD: SDF_MAX };
+}
+
+// Обводка: тёмная для светлых линий, белая для тёмных
+export const OUTLINE_MM = 0.25;
+export function outlineColor(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 110 ? '#14110f' : '#ffffff';
 }
 
 /**
@@ -251,23 +274,23 @@ export function processImageData(src, p) {
     return { main, photo };
   }
 
-  const la = lineAlpha(gray, N, p, mmPerPx);
+  const dist = lineAlpha(gray, N, p, mmPerPx);
   const mix = p.mode === 'mix';
+  const R = Math.max(0.5, p.thick / mmPerPx / 2);
+  const E = p.outline ? OUTLINE_MM / mmPerPx : 0;
+  const [er, eg, eb] = hexToRgb(outlineColor(p.color));
+  // слои снизу вверх: фото (для «контур+фото») → обводка → линия; premultiplied, потом обратно
   for (let i = 0; i < n; i++) {
-    const k = i * 4, a = la[i];
-    if (!mix) {
-      md[k] = cr; md[k + 1] = cg; md[k + 2] = cb;
-      md[k + 3] = a * 255 * mask[i];
-    } else {
-      const pa = (d[k + 3] / 255) * 0.45;
-      const oa = a + pa * (1 - a);
-      if (oa > 0) {
-        md[k] = (cr * a + d[k] * pa * (1 - a)) / oa;
-        md[k + 1] = (cg * a + d[k + 1] * pa * (1 - a)) / oa;
-        md[k + 2] = (cb * a + d[k + 2] * pa * (1 - a)) / oa;
-      } else { md[k] = cr; md[k + 1] = cg; md[k + 2] = cb; }
-      md[k + 3] = oa * 255 * mask[i];
-    }
+    const k = i * 4, dd = dist[i];
+    const a = clamp(R + 0.5 - dd, 0, 1);
+    const ea = E ? clamp(R + E + 0.5 - dd, 0, 1) : 0;
+    let pr = 0, pg = 0, pb = 0, pa = 0;
+    if (mix) { pa = (d[k + 3] / 255) * 0.45; pr = d[k] * pa; pg = d[k + 1] * pa; pb = d[k + 2] * pa; }
+    if (ea) { pr = er * ea + pr * (1 - ea); pg = eg * ea + pg * (1 - ea); pb = eb * ea + pb * (1 - ea); pa = ea + pa * (1 - ea); }
+    pr = cr * a + pr * (1 - a); pg = cg * a + pg * (1 - a); pb = cb * a + pb * (1 - a); pa = a + pa * (1 - a);
+    if (pa > 0) { md[k] = pr / pa; md[k + 1] = pg / pa; md[k + 2] = pb / pa; }
+    else { md[k] = cr; md[k + 1] = cg; md[k + 2] = cb; }
+    md[k + 3] = pa * 255 * mask[i];
   }
-  return { main, photo };
+  return { main, photo, sdf: encodeSdf(dist, N) };
 }
